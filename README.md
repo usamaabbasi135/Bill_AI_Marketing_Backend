@@ -162,17 +162,34 @@ CLAUDE_API_KEY=your-claude-key
 
 ## API Documentation
 
-### Authentication
+## API Documentation
 
-- `POST /api/auth/register` - Register new user
-- `POST /api/auth/login` - Login
+**Full API Docs:** [docs/API.md](docs/API.md)
 
-### Companies
+**Quick Test:**
+```bash
+# Health check
+curl http://localhost:5000/api/health
 
-- `GET /api/companies` - List companies
-- `POST /api/companies` - Add company
+# Register user
+curl -X POST http://localhost:5000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"test@test.com","password":"Test1234","first_name":"Test","last_name":"User","company_name":"Test Co"}'
+```
 
-(Full API docs coming soon)
+**For Frontend Developers:**
+- Base URL: `http://localhost:5000`
+- API Docs: See [docs/API.md](docs/API.md)
+- Postman Collection: [postman/Billy_AI_API.postman_collection.json](postman/Billy_AI_API.postman_collection.json)
+
+## Authentication
+
+All protected endpoints require JWT token:
+```javascript
+headers: {
+  'Authorization': 'Bearer ' + access_token
+}
+```
 
 ## Troubleshooting
 
