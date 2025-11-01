@@ -28,10 +28,10 @@ Flask backend for LinkedIn Product Launch detection and email outreach automatio
 - Docker Desktop
 - Git
 
-### Setup (5 minutes)
+### Setup
 ```bash
 # 1. Clone repo
-git clone https://github.com/YOUR_USERNAME/billy-ai-backend.git
+git clone https://github.com/usamaabbasi135/Bill_AI_Marketing_Backend
 cd billy-ai-backend
 
 # 2. Create virtual environment
