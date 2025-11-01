@@ -5,7 +5,7 @@ import uuid
 class User(db.Model):
     __tablename__ = 'users'
     
-     """
+    """
     User Model - Represents individual users within a tenant.
     
     Users belong to a tenant and can only access their tenant's data.
