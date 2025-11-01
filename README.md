@@ -2,7 +2,7 @@
 
 Flask backend for LinkedIn Product Launch detection and email outreach automation.
 
-## 🏗️ Architecture
+## Architecture
 
 - **Backend:** Flask (Python)
 - **Database:** PostgreSQL (multi-tenant)
@@ -10,7 +10,7 @@ Flask backend for LinkedIn Product Launch detection and email outreach automatio
 - **Frontend:** React (separate repo)
 - **Deployment:** AWS ECS
 
-## 📦 Tech Stack
+## Tech Stack
 
 - Flask 3.0 - Web framework
 - SQLAlchemy - ORM
@@ -20,7 +20,7 @@ Flask backend for LinkedIn Product Launch detection and email outreach automatio
 - JWT - Authentication
 - Docker - Local development
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -57,7 +57,7 @@ python run.py
 
 Server runs at: http://localhost:5000
 
-## 📁 Project Structure
+## Project Structure
 ```
 billy-ai-backend/
 ├── app/
@@ -83,7 +83,7 @@ billy-ai-backend/
 └── .env                     # Environment variables (not in git)
 ```
 
-## 🗄️ Database Schema
+## Database Schema
 
 ### Multi-Tenant Architecture
 
@@ -99,7 +99,7 @@ tenants (1) ─┬─→ users (many)
 
 All tables have `tenant_id` foreign key with `ON DELETE CASCADE`.
 
-## 🔐 Authentication
+## Authentication
 
 JWT-based authentication:
 
@@ -108,7 +108,7 @@ JWT-based authentication:
 3. Frontend includes token in all requests
 4. Backend validates token and extracts tenant_id
 
-## 🧪 Testing
+## Testing
 ```bash
 # Run all tests
 pytest
@@ -120,7 +120,7 @@ pytest tests/test_auth.py
 pytest --cov=app
 ```
 
-## 📝 Git Workflow
+## Git Workflow
 
 ### Branch Strategy
 
@@ -143,7 +143,7 @@ git commit -m "feat: add user registration endpoint (#3)"
 git push origin feature/user-registration
 ```
 
-## 🌍 Environment Variables
+## Environment Variables
 ```bash
 # Database
 DATABASE_URL=postgresql://dev:dev123@localhost:5432/billy_ai
@@ -160,7 +160,7 @@ APIFY_API_TOKEN=your-apify-token
 CLAUDE_API_KEY=your-claude-key
 ```
 
-## 📚 API Documentation
+## API Documentation
 
 ### Authentication
 
@@ -174,7 +174,7 @@ CLAUDE_API_KEY=your-claude-key
 
 (Full API docs coming soon)
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 **Database connection error:**
 ```bash
@@ -191,10 +191,10 @@ docker-compose up -d
 flask db upgrade
 ```
 
-## 👥 Team
+## Team
 
-- Backend Lead: [Your Name]
-- Frontend Developer: [Name]
+- Backend Lead: usama abbasi & Hamza
+- Frontend Developer: Saqib U llah
 
 ## 📄 License
 
