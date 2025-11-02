@@ -97,9 +97,150 @@ curl -X POST http://localhost:5000/api/auth/register \
 
 ---
 
-### Login (Coming Soon - BACKEND-4)
+### Login (BACKEND-4)
+**Endpoint:** `POST /api/auth/login
+
+### Login User
+Authenticate existing user and return JWT tokens..
+
 **Endpoint:** `POST /api/auth/login`
 
+**Request Body:**
+```json
+{
+  "email": "test@test.com",
+  "password": "Test1234"
+}
+```
+
+**Validation Rules:**
+- Email: Valid email format
+- Password: Min 8 chars, 1 uppercase, 1 number
+- All fields: Required
+
+**Success Response (201):**
+```json
+{
+  "message": "Login successful",
+  "user": {
+    "user_id": "uuid-123",
+    "tenant_id": "uuid-456",
+    "email": "test@test.com",
+    "first_name": "John",
+    "last_name": "Doe",
+    "role": "admin"
+  },
+  "access_token": "eyJhbGciOiJIUzI1...",
+  "refresh_token": "eyJhbGciOiJIUzI1..."
+}
+```
+
+**Error Responses:**
+```json
+// 404 - User not found
+{
+  "error": "User not found"
+}
+
+// 401 - Invalid password
+{
+  "error": "Invalid credentials"
+}
+
+// 400 - Missing input
+{
+  "error": "Email and password are required"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "test@test.com",
+    "password": "Test1234"
+  }'
+````
+### Refresh Token
+Use a refresh token to obtain a new access token.
+
+**Endpoint:** `POST /api/auth/refresh`
+
+**Request Body:**
+```Headers
+Authorization: Bearer <refresh_token>
+```
+
+**Success Response (201):**
+```json
+{
+  "access_token": "new_access_token_here"
+}
+```
+
+**Error Responses:**
+```json
+// 401 - Missing or invalid token
+{
+  "msg": "Missing Authorization Header"
+}
+
+// 404 - User not found
+{
+  "error": "User not found"
+}
+
+```
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:5000/api/auth/refresh \
+  -H "Authorization: Bearer <refresh_token>"
+````
+
+### Get Current User
+Retrieve information about the currently authenticated user.
+
+**Endpoint:** `GET /api/auth/me`
+
+**Request Body:**
+```Headers
+Authorization: Bearer <refresh_token>
+```
+
+**Success Response (201):**
+```json
+{
+  "user": {
+    "user_id": "uuid-123",
+    "tenant_id": "uuid-456",
+    "email": "test@test.com",
+    "first_name": "John",
+    "last_name": "Doe",
+    "role": "admin"
+  }
+}
+```
+
+**Error Responses:**
+```json
+// 401 - Missing or invalid access token
+{
+  "msg": "Missing Authorization Header"
+}
+
+// 404 - User not found
+{
+  "error": "User not found"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X GET http://localhost:5000/api/auth/me \
+  -H "Authorization: Bearer <access_token>"
+````
 ---
 
 ## Company Endpoints (Coming Soon)

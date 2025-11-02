@@ -6,6 +6,8 @@ from app.extensions import db
 from app.models.tenant import Tenant
 from app.models.user import User
 from app.schemas.auth_schema import RegisterSchema, UserResponseSchema, TenantResponseSchema
+from werkzeug.security import check_password_hash
+from flask_jwt_extended import jwt_required, get_jwt_identity
 
 # Create Blueprint
 bp = Blueprint('auth', __name__)
@@ -126,5 +128,124 @@ def register():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": "Internal server error", "details": str(e)}), 500
-    
-    
+
+
+@bp.route('/login', methods=['POST'])
+def login():
+    """
+    Login Endpoint
+
+    Flow:
+    1️⃣ Receive email, password
+    2️⃣ Find user in DB
+    3️⃣ Verify password hash
+    4️⃣ Generate JWT tokens (24h expiry)
+    5️⃣ Return user info + tokens
+
+    Responses:
+      200 ✅ Login successful
+      401 ❌ Wrong password
+      404 ❌ User not found
+    """
+
+    data = request.get_json() or {}
+
+    email = data.get('email')
+    password = data.get('password')
+
+    if not email or not password:
+        return jsonify({"error": "Email and password are required"}), 400
+
+    # Step 1: Lookup user
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    # Step 2: Verify password
+    if not check_password_hash(user.password_hash, password):
+        return jsonify({"error": "Invalid credentials"}), 401
+
+    # Step 3: Create JWT tokens
+    access_token = create_access_token(
+        identity=user.user_id,
+        additional_claims={
+            "tenant_id": user.tenant_id,
+            "email": user.email,
+            "role": user.role
+        }
+    )
+    refresh_token = create_refresh_token(identity=user.user_id)
+
+    # Step 4: Prepare user info
+    user_info = {
+        "user_id": user.user_id,
+        "tenant_id": user.tenant_id,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "role": user.role
+    }
+
+    # Step 5: Return response
+    return jsonify({
+        "message": "Login successful",
+        "user": user_info,
+        "access_token": access_token,
+        "refresh_token": refresh_token
+    }), 200
+
+
+@bp.route('/refresh', methods=['POST'])
+@jwt_required(refresh=True)
+def refresh():
+    """
+    Refresh Token Endpoint
+    - Requires a valid refresh token
+    - Returns a new access token
+    """
+
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    new_access_token = create_access_token(
+        identity=user.user_id,
+        additional_claims={
+            "tenant_id": user.tenant_id,
+            "email": user.email,
+            "role": user.role
+        }
+    )
+
+    return jsonify({
+        "access_token": new_access_token
+    }), 200
+
+# for saqib: (move or change as needed)
+
+@bp.route('/me', methods=['GET'])
+@jwt_required()
+def me():
+    """
+    Return current logged-in user's info.
+    - Requires valid access token
+    """
+
+    current_user_id = get_jwt_identity()
+    user = User.query.filter_by(user_id=current_user_id).first()
+
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+
+    user_info = {
+        "user_id": user.user_id,
+        "tenant_id": user.tenant_id,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "role": user.role
+    }
+
+    return jsonify({"user": user_info}), 200
