@@ -22,6 +22,8 @@ def create_app(config_class=Config):
     # Register blueprints
     from app.api import auth  # ← Add this
     app.register_blueprint(auth.bp, url_prefix='/api/auth')  # ← Add this
+    from app.api import companies
+    app.register_blueprint(companies.bp, url_prefix='/api/companies')
     
     @app.route('/api/health', methods=['GET'])
     def health():
