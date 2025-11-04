@@ -175,6 +175,12 @@ curl http://localhost:5000/api/health
 curl -X POST http://localhost:5000/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"test@test.com","password":"Test1234","first_name":"Test","last_name":"User","company_name":"Test Co"}'
+
+# Create company (replace <ACCESS_TOKEN>)
+curl -X POST http://localhost:5000/api/companies \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -d '{"name":"OpenAI","linkedin_url":"https://www.linkedin.com/company/openai/"}'
 ```
 
 **For Frontend Developers:**
