@@ -243,15 +243,71 @@ curl -X GET http://localhost:5000/api/auth/me \
 ````
 ---
 
-## Company Endpoints (Coming Soon)
-
-### List Companies
-**Endpoint:** `GET /api/companies`
-**Auth Required:** Yes
+## Company Endpoints
 
 ### Add Company
+Create a LinkedIn company for the current tenant to track.
+
 **Endpoint:** `POST /api/companies`
-**Auth Required:** Yes
+
+**Auth Required:** Yes (Bearer access token)
+
+**Request Body:**
+```json
+{
+  "name": "OpenAI",
+  "linkedin_url": "https://www.linkedin.com/company/openai/"
+}
+```
+
+**Validation Rules:**
+- `name`: 2–255 characters
+- `linkedin_url`: Must match LinkedIn company URL format, e.g. `https://www.linkedin.com/company/<slug>/`
+- Duplicate prevention: Same `linkedin_url` cannot be added twice by the same tenant
+
+**Success Response (201):**
+```json
+{
+  "company": {
+    "company_id": "uuid-123",
+    "tenant_id": "uuid-456",
+    "name": "OpenAI",
+    "linkedin_url": "https://www.linkedin.com/company/openai/",
+    "is_active": true,
+    "created_at": "2025-11-04T12:34:56.000000"
+  }
+}
+```
+
+**Error Responses:**
+```json
+// 401 - Missing/invalid token
+{
+  "error": "Unauthorized"
+}
+
+// 400 - Invalid URL or validation failure
+{
+  "error": "Validation failed",
+  "details": { "linkedin_url": ["Invalid LinkedIn company URL"] }
+}
+
+// 400 - Duplicate within tenant
+{
+  "error": "Company already added for this tenant"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:5000/api/companies \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -d '{
+    "name": "OpenAI",
+    "linkedin_url": "https://www.linkedin.com/company/openai/"
+  }'
+```
 
 ---
 
@@ -349,6 +405,9 @@ See: [Database Documentation](DATABASE.md)
 ---
 
 ## Change Log
+
+### 2025-11-04
+- POST /api/companies - Add company to track (JWT, URL validation, duplicate prevention)
 
 ### 2025-11-01
 - POST /api/auth/register - User registration
