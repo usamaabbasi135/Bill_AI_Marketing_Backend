@@ -24,6 +24,19 @@ def create_app(config_class=Config):
     app.register_blueprint(auth.bp, url_prefix='/api/auth')  # ← Add this
     from app.api import companies
     app.register_blueprint(companies.bp, url_prefix='/api/companies')
+
+    # JWT error handlers for clearer responses
+    @jwt.unauthorized_loader
+    def jwt_missing_token(err):
+        return jsonify({"error": "Unauthorized", "details": err}), 401
+
+    @jwt.invalid_token_loader
+    def jwt_invalid_token(err):
+        return jsonify({"error": "Invalid token", "details": err}), 401
+
+    @jwt.expired_token_loader
+    def jwt_expired_token(header, payload):
+        return jsonify({"error": "Token expired"}), 401
     
     @app.route('/api/health', methods=['GET'])
     def health():
