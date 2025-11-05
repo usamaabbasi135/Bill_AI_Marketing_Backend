@@ -150,7 +150,7 @@ Authenticate existing user and return JWT tokens..
 curl -X POST http://localhost:5000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "test@test.com",
+    "email": "test12345@test.com",
     "password": "Test1234"
   }'
 ````
