@@ -46,14 +46,7 @@ Create new user account and tenant workspace.
     "email": "user@example.com",
     "first_name": "John",
     "last_name": "Doe",
-    "role": "admin",
-    "tenant_id": "uuid-456"
-  },
-  "tenant": {
-    "tenant_id": "uuid-456",
-    "company_name": "Acme Inc",
-    "plan": "free",
-    "status": "active"
+    "role": "admin"
   },
   "access_token": "eyJhbGc...",
   "refresh_token": "eyJhbGc..."
@@ -124,7 +117,6 @@ Authenticate existing user and return JWT tokens..
   "message": "Login successful",
   "user": {
     "user_id": "uuid-123",
-    "tenant_id": "uuid-456",
     "email": "test@test.com",
     "first_name": "John",
     "last_name": "Doe",
@@ -158,7 +150,7 @@ Authenticate existing user and return JWT tokens..
 curl -X POST http://localhost:5000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "test@test.com",
+    "email": "test12345@test.com",
     "password": "Test1234"
   }'
 ````
