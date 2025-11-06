@@ -301,6 +301,53 @@ curl -X POST http://localhost:5000/api/companies \
   }'
 ```
 
+### List Companies
+Return a paginated list of companies for the current tenant.
+
+**Endpoint:** `GET /api/companies`
+
+**Auth Required:** Yes (Bearer access token)
+
+**Query Params:**
+- `page` (number, default `1`)
+- `limit` (number, default `20`, max `100`)
+- `is_active` (boolean string: `true|false|1|0|yes|no`, optional)
+
+**Success Response (200):**
+```json
+{
+  "companies": [
+    {
+      "company_id": "uuid-123",
+      "name": "OpenAI",
+      "linkedin_url": "https://www.linkedin.com/company/openai/",
+      "is_active": true,
+      "created_at": "2025-11-04T12:34:56.000000"
+    }
+  ],
+  "page": 1,
+  "limit": 20,
+  "total": 1
+}
+```
+
+**Error Responses:**
+```json
+// 401 - Missing/invalid token
+{ "error": "Unauthorized" }
+```
+
+**cURL Examples:**
+```bash
+# Default (page=1, limit=20)
+curl -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  http://localhost:5000/api/companies
+
+# Page 2, 10 per page, only active companies
+curl -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  "http://localhost:5000/api/companies?page=2&limit=10&is_active=true"
+```
+
 ---
 
 ## Posts Endpoints (Coming Soon)
