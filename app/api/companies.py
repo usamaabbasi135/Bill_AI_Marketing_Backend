@@ -92,3 +92,76 @@ def create_company():
     return jsonify({"company": company_obj}), 201
 
 
+@bp.route('', methods=['GET'])
+@jwt_required()
+def list_companies():
+    """List companies for the current tenant with pagination and filtering.
+
+    Query Params:
+      - page: int (default 1)
+      - limit: int (default 20, max 100)
+      - is_active: bool (optional) -> true/false
+    """
+
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    # Pagination params
+    try:
+        page = int((request.args.get('page') or '1').strip())
+    except Exception:
+        page = 1
+    if page < 1:
+        page = 1
+
+    try:
+        limit = int((request.args.get('limit') or '20').strip())
+    except Exception:
+        limit = 20
+    if limit < 1:
+        limit = 20
+    if limit > 100:
+        limit = 100
+
+    # Optional is_active filter
+    is_active_param = request.args.get('is_active')
+    query = Company.query.filter_by(tenant_id=tenant_id)
+    if is_active_param is not None:
+        val = is_active_param.strip().lower()
+        if val in ('true', '1', 'yes'):
+            query = query.filter(Company.is_active.is_(True))
+        elif val in ('false', '0', 'no'):
+            query = query.filter(Company.is_active.is_(False))
+        # else: ignore invalid values and return unfiltered
+
+    total = query.count()
+
+    items = (
+        query
+        .order_by(Company.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    companies = []
+    for c in items:
+        companies.append({
+            "company_id": c.company_id,
+            "name": c.name,
+            "linkedin_url": c.linkedin_url,
+            "is_active": c.is_active,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+
+    # Return array and minimal pagination metadata
+    return jsonify({
+        "companies": companies,
+        "page": page,
+        "limit": limit,
+        "total": total
+    }), 200
+
+
