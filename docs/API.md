@@ -348,6 +348,86 @@ curl -H "Authorization: Bearer <ACCESS_TOKEN>" \
   "http://localhost:5000/api/companies?page=2&limit=10&is_active=true"
 ```
 
+### Update Company
+Update fields for a company that belongs to the current tenant.
+
+**Endpoint:** `PATCH /api/companies/{company_id}`
+
+**Auth Required:** Yes (Bearer access token)
+
+**Request Body (any of):**
+```json
+{
+  "name": "OpenAI Research",
+  "linkedin_url": "https://www.linkedin.com/company/openai/",
+  "is_active": true
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "company": {
+    "company_id": "uuid-123",
+    "name": "OpenAI Research",
+    "linkedin_url": "https://www.linkedin.com/company/openai/",
+    "is_active": true,
+    "created_at": "2025-11-04T12:34:56.000000"
+  }
+}
+```
+
+**Errors:**
+```json
+// 401 - Missing/invalid token
+{ "error": "Unauthorized" }
+
+// 403 - Company belongs to different tenant
+{ "error": "Forbidden" }
+
+// 404 - Not found
+{ "error": "Company not found" }
+
+// 400 - Validation failure or duplicate linkedin_url for tenant
+{ "error": "Validation failed", "details": { "linkedin_url": ["Invalid LinkedIn company URL"] } }
+```
+
+**cURL Example:**
+```bash
+curl -X PATCH http://localhost:5000/api/companies/<COMPANY_ID> \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -d '{"name":"OpenAI Research","is_active":true}'
+```
+
+### Delete Company (Soft Delete)
+Set `is_active=false` for a company that belongs to the current tenant.
+
+**Endpoint:** `DELETE /api/companies/{company_id}`
+
+**Auth Required:** Yes (Bearer access token)
+
+**Success Response (200):**
+```json
+{
+  "company": {
+    "company_id": "uuid-123",
+    "name": "OpenAI",
+    "linkedin_url": "https://www.linkedin.com/company/openai/",
+    "is_active": false,
+    "created_at": "2025-11-04T12:34:56.000000"
+  }
+}
+```
+
+**Errors:** same as Update Company.
+
+**cURL Example:**
+```bash
+curl -X DELETE http://localhost:5000/api/companies/<COMPANY_ID> \
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
+```
+
 ---
 
 ## Posts Endpoints (Coming Soon)

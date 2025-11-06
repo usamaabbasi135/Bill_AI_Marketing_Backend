@@ -36,6 +36,30 @@ class CreateCompanySchema(Schema):
 create_company_schema = CreateCompanySchema()
 
 
+class UpdateCompanySchema(Schema):
+    name = fields.Str(required=False)
+    linkedin_url = fields.Str(required=False)
+    is_active = fields.Boolean(required=False)
+
+    @validates('name')
+    def validate_name(self, value):
+        if value is None:
+            return
+        if len(value.strip()) < 2:
+            raise ValidationError("Company name must be at least 2 characters")
+        if len(value) > 255:
+            raise ValidationError("Company name must be less than 255 characters")
+
+    @validates('linkedin_url')
+    def validate_linkedin_url(self, value):
+        if value is None:
+            return
+        import re
+        pattern = r"^(https?:\/\/)?(www\.)?linkedin\.com\/company\/[A-Za-z0-9-_.%]+\/?(.*)?$"
+        if not re.match(pattern, value.strip()):
+            raise ValidationError("Invalid LinkedIn company URL")
+
+
 @bp.route('', methods=['POST'])
 @jwt_required()
 def create_company():
@@ -164,4 +188,92 @@ def list_companies():
         "total": total
     }), 200
 
+
+@bp.route('/<company_id>', methods=['PATCH'])
+@jwt_required()
+def update_company(company_id):
+    """Update a company's fields for the current tenant.
+
+    Allowed fields: name, linkedin_url, is_active
+    Validates tenant ownership and prevents duplicate linkedin_url per tenant.
+    """
+
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    company = Company.query.filter_by(company_id=company_id).first()
+    if not company:
+        return jsonify({"error": "Company not found"}), 404
+
+    if company.tenant_id != tenant_id:
+        return jsonify({"error": "Forbidden"}), 403
+
+    data = request.get_json() or {}
+    try:
+        validated = UpdateCompanySchema().load(data)
+    except ValidationError as err:
+        return jsonify({"error": "Validation failed", "details": err.messages}), 400
+
+    # If linkedin_url provided, ensure not duplicate for this tenant (excluding current)
+    new_linkedin = validated.get('linkedin_url')
+    if new_linkedin:
+        existing = Company.query.filter(
+            Company.tenant_id == tenant_id,
+            Company.linkedin_url == new_linkedin,
+            Company.company_id != company.company_id
+        ).first()
+        if existing:
+            return jsonify({"error": "Company already added for this tenant"}), 400
+
+    if 'name' in validated:
+        company.name = validated['name'].strip()
+    if 'linkedin_url' in validated:
+        company.linkedin_url = validated['linkedin_url'].strip()
+    if 'is_active' in validated:
+        company.is_active = bool(validated['is_active'])
+
+    db.session.commit()
+
+    company_obj = {
+        "company_id": company.company_id,
+        "name": company.name,
+        "linkedin_url": company.linkedin_url,
+        "is_active": company.is_active,
+        "created_at": company.created_at.isoformat() if company.created_at else None,
+    }
+
+    return jsonify({"company": company_obj}), 200
+
+
+@bp.route('/<company_id>', methods=['DELETE'])
+@jwt_required()
+def delete_company(company_id):
+    """Soft delete a company (set is_active=false) for the current tenant."""
+
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+
+    company = Company.query.filter_by(company_id=company_id).first()
+    if not company:
+        return jsonify({"error": "Company not found"}), 404
+
+    if company.tenant_id != tenant_id:
+        return jsonify({"error": "Forbidden"}), 403
+
+    company.is_active = False
+    db.session.commit()
+
+    company_obj = {
+        "company_id": company.company_id,
+        "name": company.name,
+        "linkedin_url": company.linkedin_url,
+        "is_active": company.is_active,
+        "created_at": company.created_at.isoformat() if company.created_at else None,
+    }
+
+    return jsonify({"company": company_obj}), 200
 
