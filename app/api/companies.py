@@ -106,7 +106,6 @@ def create_company():
 
     company_obj = {
         "company_id": company.company_id,
-        "tenant_id": company.tenant_id,
         "name": company.name,
         "linkedin_url": company.linkedin_url,
         "is_active": company.is_active,
