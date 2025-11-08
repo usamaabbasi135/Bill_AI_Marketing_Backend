@@ -16,6 +16,11 @@ def create_app(config_class=Config):
     migrate.init_app(app, db)
     CORS(app)
     
+    # Health check endpoint - register early so it's always available
+    @app.route('/api/health', methods=['GET'])
+    def health():
+        return jsonify({"status": "ok"}), 200
+    
     # Import models
     from app.models import Tenant, User, Company, Post, Profile, Email, TenantSetting
     
@@ -37,9 +42,5 @@ def create_app(config_class=Config):
     @jwt.expired_token_loader
     def jwt_expired_token(header, payload):
         return jsonify({"error": "Token expired"}), 401
-    
-    @app.route('/api/health', methods=['GET'])
-    def health():
-        return jsonify({"status": "ok"}), 200
     
     return app
