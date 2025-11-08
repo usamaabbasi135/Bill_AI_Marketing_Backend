@@ -46,14 +46,7 @@ Create new user account and tenant workspace.
     "email": "user@example.com",
     "first_name": "John",
     "last_name": "Doe",
-    "role": "admin",
-    "tenant_id": "uuid-456"
-  },
-  "tenant": {
-    "tenant_id": "uuid-456",
-    "company_name": "Acme Inc",
-    "plan": "free",
-    "status": "active"
+    "role": "admin"
   },
   "access_token": "eyJhbGc...",
   "refresh_token": "eyJhbGc..."
@@ -124,7 +117,6 @@ Authenticate existing user and return JWT tokens..
   "message": "Login successful",
   "user": {
     "user_id": "uuid-123",
-    "tenant_id": "uuid-456",
     "email": "test@test.com",
     "first_name": "John",
     "last_name": "Doe",
@@ -158,7 +150,7 @@ Authenticate existing user and return JWT tokens..
 curl -X POST http://localhost:5000/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
-    "email": "test@test.com",
+    "email": "test12345@test.com",
     "password": "Test1234"
   }'
 ````
@@ -307,6 +299,133 @@ curl -X POST http://localhost:5000/api/companies \
     "name": "OpenAI",
     "linkedin_url": "https://www.linkedin.com/company/openai/"
   }'
+```
+
+### List Companies
+Return a paginated list of companies for the current tenant.
+
+**Endpoint:** `GET /api/companies`
+
+**Auth Required:** Yes (Bearer access token)
+
+**Query Params:**
+- `page` (number, default `1`)
+- `limit` (number, default `20`, max `100`)
+- `is_active` (boolean string: `true|false|1|0|yes|no`, optional)
+
+**Success Response (200):**
+```json
+{
+  "companies": [
+    {
+      "company_id": "uuid-123",
+      "name": "OpenAI",
+      "linkedin_url": "https://www.linkedin.com/company/openai/",
+      "is_active": true,
+      "created_at": "2025-11-04T12:34:56.000000"
+    }
+  ],
+  "page": 1,
+  "limit": 20,
+  "total": 1
+}
+```
+
+**Error Responses:**
+```json
+// 401 - Missing/invalid token
+{ "error": "Unauthorized" }
+```
+
+**cURL Examples:**
+```bash
+# Default (page=1, limit=20)
+curl -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  http://localhost:5000/api/companies
+
+# Page 2, 10 per page, only active companies
+curl -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  "http://localhost:5000/api/companies?page=2&limit=10&is_active=true"
+```
+
+### Update Company
+Update fields for a company that belongs to the current tenant.
+
+**Endpoint:** `PATCH /api/companies/{company_id}`
+
+**Auth Required:** Yes (Bearer access token)
+
+**Request Body (any of):**
+```json
+{
+  "name": "OpenAI Research",
+  "linkedin_url": "https://www.linkedin.com/company/openai/",
+  "is_active": true
+}
+```
+
+**Success Response (200):**
+```json
+{
+  "company": {
+    "company_id": "uuid-123",
+    "name": "OpenAI Research",
+    "linkedin_url": "https://www.linkedin.com/company/openai/",
+    "is_active": true,
+    "created_at": "2025-11-04T12:34:56.000000"
+  }
+}
+```
+
+**Errors:**
+```json
+// 401 - Missing/invalid token
+{ "error": "Unauthorized" }
+
+// 403 - Company belongs to different tenant
+{ "error": "Forbidden" }
+
+// 404 - Not found
+{ "error": "Company not found" }
+
+// 400 - Validation failure or duplicate linkedin_url for tenant
+{ "error": "Validation failed", "details": { "linkedin_url": ["Invalid LinkedIn company URL"] } }
+```
+
+**cURL Example:**
+```bash
+curl -X PATCH http://localhost:5000/api/companies/<COMPANY_ID> \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -d '{"name":"OpenAI Research","is_active":true}'
+```
+
+### Delete Company (Soft Delete)
+Set `is_active=false` for a company that belongs to the current tenant.
+
+**Endpoint:** `DELETE /api/companies/{company_id}`
+
+**Auth Required:** Yes (Bearer access token)
+
+**Success Response (200):**
+```json
+{
+  "company": {
+    "company_id": "uuid-123",
+    "name": "OpenAI",
+    "linkedin_url": "https://www.linkedin.com/company/openai/",
+    "is_active": false,
+    "created_at": "2025-11-04T12:34:56.000000"
+  }
+}
+```
+
+**Errors:** same as Update Company.
+
+**cURL Example:**
+```bash
+curl -X DELETE http://localhost:5000/api/companies/<COMPANY_ID> \
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
 ```
 
 ---
