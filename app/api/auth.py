@@ -116,11 +116,18 @@ def register():
         
         refresh_token = create_refresh_token(identity=user.user_id)
         
-        # Step 9: Return response
+        # Step 9: Return minimal response (no tenant_id exposure)
+        safe_user = {
+            "user_id": user.user_id,
+            "email": user.email,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "role": user.role,
+        }
+
         return jsonify({
             "message": "Registration successful",
-            "user": user_schema.dump(user),
-            "tenant": tenant_schema.dump(tenant),
+            "user": safe_user,
             "access_token": access_token,
             "refresh_token": refresh_token
         }), 201
@@ -179,7 +186,6 @@ def login():
     # Step 4: Prepare user info
     user_info = {
         "user_id": user.user_id,
-        "tenant_id": user.tenant_id,
         "email": user.email,
         "first_name": user.first_name,
         "last_name": user.last_name,
