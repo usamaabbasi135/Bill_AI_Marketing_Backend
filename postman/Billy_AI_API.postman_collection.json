@@ -326,6 +326,57 @@
             },
             "description": "Soft delete a company (sets is_active=false). Company data is preserved but marked inactive. Must own the company."
           }
+        },
+        {
+          "name": "Scrape Company Posts",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/companies/{{company_id}}/scrape?max_posts=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "companies", "{{company_id}}", "scrape"],
+              "query": [
+                {
+                  "key": "max_posts",
+                  "value": "5",
+                  "description": "Maximum number of posts to scrape (1-1000, default: 100)"
+                }
+              ]
+            },
+            "description": "Trigger LinkedIn post scraping for a company using Apify. Returns job_id immediately (async task). Scraped posts are saved to the database. Must own the company."
+          }
+        },
+        {
+          "name": "Scrape Company Posts (JSON Body)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"max_posts\": 10\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/companies/{{company_id}}/scrape",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "companies", "{{company_id}}", "scrape"]
+            },
+            "description": "Trigger LinkedIn post scraping with max_posts in request body instead of query parameter."
+          }
         }
       ]
     },
