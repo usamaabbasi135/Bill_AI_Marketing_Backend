@@ -25,10 +25,12 @@ def create_app(config_class=Config):
     from app.models import Tenant, User, Company, Post, Profile, Email, TenantSetting
     
     # Register blueprints
-    from app.api import auth  # ← Add this
-    app.register_blueprint(auth.bp, url_prefix='/api/auth')  # ← Add this
+    from app.api import auth
+    app.register_blueprint(auth.bp, url_prefix='/api/auth')
     from app.api import companies
     app.register_blueprint(companies.bp, url_prefix='/api/companies')
+    from app.api import posts
+    app.register_blueprint(posts.bp, url_prefix='/api/posts')
 
     # JWT error handlers for clearer responses
     @jwt.unauthorized_loader
