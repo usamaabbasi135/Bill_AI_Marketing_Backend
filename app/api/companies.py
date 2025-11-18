@@ -276,3 +276,80 @@ def delete_company(company_id):
 
     return jsonify({"company": company_obj}), 200
 
+
+@bp.route('/<company_id>/scrape', methods=['POST'])
+@jwt_required()
+def scrape_company(company_id):
+    """Trigger LinkedIn post scraping for a company using Apify.
+    
+    Query Params or Body:
+      - max_posts (int, optional, default: 100): Maximum number of posts to scrape (1-1000)
+    
+    Returns job_id immediately (async task).
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    # Verify company exists and belongs to tenant
+    company = Company.query.filter_by(company_id=company_id).first()
+    if not company:
+        return jsonify({"error": "Company not found"}), 404
+    
+    if company.tenant_id != tenant_id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    if not company.is_active:
+        return jsonify({"error": "Company is inactive"}), 400
+    
+    # Get max_posts from query params or request body
+    max_posts = 100  # default
+    if request.args.get('max_posts'):
+        try:
+            max_posts = int(request.args.get('max_posts'))
+            if max_posts < 1:
+                max_posts = 1
+            if max_posts > 1000:  # Reasonable limit
+                max_posts = 1000
+        except ValueError:
+            return jsonify({"error": "max_posts must be a valid integer"}), 400
+    
+    # Also check request body (if Content-Type is application/json)
+    data = {}
+    if request.is_json:
+        try:
+            data = request.get_json() or {}
+        except Exception:
+            # If JSON parsing fails, just use empty dict
+            data = {}
+    
+    if data.get('max_posts'):
+        try:
+            max_posts = int(data.get('max_posts'))
+            if max_posts < 1:
+                max_posts = 1
+            if max_posts > 1000:
+                max_posts = 1000
+        except ValueError:
+            return jsonify({"error": "max_posts must be a valid integer"}), 400
+    
+    # Import task here to avoid circular imports
+    from app.tasks.scraper import scrape_company_posts
+    
+    # Start async Celery task
+    try:
+        task = scrape_company_posts.delay(company_id, max_posts)
+        return jsonify({
+            "message": "Scraping job started",
+            "job_id": task.id,
+            "company_id": company_id,
+            "max_posts": max_posts,
+            "status_url": f"/api/jobs/{task.id}"  # Future endpoint for job status
+        }), 202
+    except Exception as e:
+        return jsonify({
+            "error": "Failed to start scraping job",
+            "details": str(e)
+        }), 500
+
