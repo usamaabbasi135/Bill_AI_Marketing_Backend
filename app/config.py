@@ -17,3 +17,11 @@ class Config:
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
+    
+    # Celery Configuration
+    CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+    CELERY_RESULT_BACKEND = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+    
+    # Apify Configuration
+    APIFY_API_TOKEN = os.getenv('APIFY_API_TOKEN')
+    APIFY_ACTOR_ID = 'apimaestro/linkedin-company-posts'
