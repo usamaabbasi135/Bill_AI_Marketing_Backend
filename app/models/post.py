@@ -13,5 +13,4 @@ class Post(db.Model):
     post_date = db.Column(db.Date)
     score = db.Column(db.Integer, default=0)
     ai_judgement = db.Column(db.String(50))
-    analyzed_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
