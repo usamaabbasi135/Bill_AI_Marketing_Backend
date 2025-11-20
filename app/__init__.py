@@ -29,6 +29,12 @@ def create_app(config_class=Config):
     app.register_blueprint(auth.bp, url_prefix='/api/auth')  # ← Add this
     from app.api import companies
     app.register_blueprint(companies.bp, url_prefix='/api/companies')
+    from app.api import posts
+    app.register_blueprint(posts.bp, url_prefix='/api/posts')
+    from app.api import profiles
+    app.register_blueprint(profiles.bp, url_prefix='/api/profiles')
+    from app.api import jobs
+    app.register_blueprint(jobs.bp, url_prefix='/api/jobs')
 
     # JWT error handlers for clearer responses
     @jwt.unauthorized_loader

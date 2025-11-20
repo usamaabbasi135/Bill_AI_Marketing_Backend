@@ -151,6 +151,10 @@ DATABASE_URL=postgresql://dev:dev123@localhost:5432/billy_ai
 # Redis
 REDIS_URL=redis://localhost:6379/0
 
+# Celery (defaults fall back to Redis URL above)
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/0
+
 # Security (generate with: python -c "import secrets; print(secrets.token_hex(32))")
 JWT_SECRET_KEY=your-jwt-secret-here
 SECRET_KEY=your-flask-secret-here
