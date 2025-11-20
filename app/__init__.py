@@ -22,7 +22,18 @@ def create_app(config_class=Config):
         return jsonify({"status": "ok"}), 200
     
     # Import models
-    from app.models import Tenant, User, Company, Post, Profile, Email, TenantSetting, EmailTemplate
+    from app.models import (
+        Tenant,
+        User,
+        Company,
+        Post,
+        Profile,
+        Email,
+        TenantSetting,
+        EmailTemplate,
+        Campaign,
+        CampaignProfile,
+    )
     
     # Register blueprints
     from app.api import auth
@@ -33,6 +44,8 @@ def create_app(config_class=Config):
     app.register_blueprint(posts.bp, url_prefix='/api/posts')
     from app.api import templates
     app.register_blueprint(templates.bp, url_prefix='/api/templates')
+    from app.api import campaigns
+    app.register_blueprint(campaigns.bp, url_prefix='/api/campaigns')
     # Register profiles blueprint if it exists
     try:
         from app.api import profiles
