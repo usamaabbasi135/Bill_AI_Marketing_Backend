@@ -42,16 +42,8 @@ def create_app(config_class=Config):
     app.register_blueprint(companies.bp, url_prefix='/api/companies')
     from app.api import posts
     app.register_blueprint(posts.bp, url_prefix='/api/posts')
-    from app.api import templates
-    app.register_blueprint(templates.bp, url_prefix='/api/templates')
-    from app.api import campaigns
-    app.register_blueprint(campaigns.bp, url_prefix='/api/campaigns')
-    # Register profiles blueprint if it exists
-    try:
-        from app.api import profiles
-        app.register_blueprint(profiles.bp, url_prefix='/api/profiles')
-    except ImportError:
-        pass  # profiles module doesn't exist yet
+    from app.api import profiles
+    app.register_blueprint(profiles.bp, url_prefix='/api/profiles')
 
     # JWT error handlers for clearer responses
     @jwt.unauthorized_loader

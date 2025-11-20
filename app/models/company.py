@@ -32,6 +32,7 @@ class Company(db.Model):
     name = db.Column(db.String(255), nullable=False)
     linkedin_url = db.Column(db.Text, nullable=False)
     is_active = db.Column(db.Boolean, default=True)
+    last_scraped_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationships
