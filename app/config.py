@@ -18,9 +18,10 @@ class Config:
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=24)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=30)
     
-    # Celery Configuration
-    CELERY_BROKER_URL = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-    CELERY_RESULT_BACKEND = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
+    # Celery Configuration - support both REDIS_URL and CELERY_BROKER_URL
+    redis_url = os.getenv('REDIS_URL') or os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+    CELERY_BROKER_URL = redis_url
+    CELERY_RESULT_BACKEND = os.getenv('CELERY_RESULT_BACKEND', redis_url)
     
     # Apify Configuration
     APIFY_API_TOKEN = os.getenv('APIFY_API_TOKEN')
