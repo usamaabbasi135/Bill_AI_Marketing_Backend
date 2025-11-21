@@ -33,6 +33,10 @@ def create_app(config_class=Config):
     app.register_blueprint(posts.bp, url_prefix='/api/posts')
     from app.api import profiles
     app.register_blueprint(profiles.bp, url_prefix='/api/profiles')
+    from app.api import jobs
+    app.register_blueprint(jobs.bp, url_prefix='/api/jobs')
+    from app.api import dashboard
+    app.register_blueprint(dashboard.bp, url_prefix='/api/dashboard')
 
     # JWT error handlers for clearer responses
     @jwt.unauthorized_loader
