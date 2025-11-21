@@ -1,119 +1,108 @@
-"""
-API endpoints for LinkedIn posts analysis
-"""
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt
-from marshmallow import Schema, fields, validates, ValidationError
 from app.extensions import db
 from app.models.post import Post
-from app.tasks.ai_analyzer import analyze_post
+from app.models.company import Company
+from datetime import datetime
 
 bp = Blueprint('posts', __name__)
 
 
-class BatchAnalyzeSchema(Schema):
-    post_ids = fields.List(fields.Str(), required=True, error_messages={
-        "required": "post_ids is required"
-    })
-    
-    @validates('post_ids')
-    def validate_post_ids(self, value):
-        if not value or len(value) == 0:
-            raise ValidationError("post_ids cannot be empty")
-        if len(value) > 100:
-            raise ValidationError("Cannot analyze more than 100 posts at once")
-
-
-batch_analyze_schema = BatchAnalyzeSchema()
-
-
-@bp.route('/<post_id>/analyze', methods=['POST'])
+@bp.route('', methods=['GET'])
 @jwt_required()
-def analyze_single_post(post_id):
-    """
-    Analyze a single post using Claude AI.
+def list_posts():
+    """List scraped LinkedIn posts for the current tenant with filtering and pagination.
+
+    Query Params:
+      - page: int (default 1)
+      - limit: int (default 20, max 100)
+      - company_id: str (optional) - filter by company
+      - start_date: str (optional) - filter posts from this date (YYYY-MM-DD)
+      - ai_judgement: str (optional) - filter by AI judgement (e.g., "product_launch")
     
     Returns:
-        - job_id: Celery task ID for tracking
-        - post_id: The post ID being analyzed
+      - post_id, company_name, post_text, post_date, score, ai_judgement
+      - Sorted by post_date DESC (newest first)
     """
+
     claims = get_jwt()
     tenant_id = claims.get('tenant_id')
     if not tenant_id:
         return jsonify({"error": "Unauthorized"}), 401
-    
-    # Verify post exists and belongs to tenant
-    post = Post.query.filter_by(post_id=post_id, tenant_id=tenant_id).first()
-    if not post:
-        return jsonify({"error": "Post not found"}), 404
-    
-    # Queue Celery task
-    task = analyze_post.delay(post_id)
-    
-    return jsonify({
-        "job_id": task.id,
-        "post_id": post_id,
-        "status": "queued"
-    }), 202
 
-
-@bp.route('/analyze-batch', methods=['POST'])
-@jwt_required()
-def analyze_batch_posts():
-    """
-    Analyze multiple posts in batch.
-    
-    Request body:
-        {
-            "post_ids": ["uuid1", "uuid2", ...]
-        }
-    
-    Returns:
-        - job_ids: List of Celery task IDs
-        - posts: List of post info with job_id mapping
-    """
-    claims = get_jwt()
-    tenant_id = claims.get('tenant_id')
-    if not tenant_id:
-        return jsonify({"error": "Unauthorized"}), 401
-    
-    data = request.get_json() or {}
-    
+    # Pagination params
     try:
-        validated = batch_analyze_schema.load(data)
-    except ValidationError as err:
-        return jsonify({"error": "Validation failed", "details": err.messages}), 400
-    
-    post_ids = validated['post_ids']
-    
-    # Verify all posts exist and belong to tenant
-    posts = Post.query.filter(
-        Post.post_id.in_(post_ids),
-        Post.tenant_id == tenant_id
-    ).all()
-    
-    found_post_ids = {post.post_id for post in posts}
-    missing_ids = set(post_ids) - found_post_ids
-    
-    if missing_ids:
-        return jsonify({
-            "error": "Some posts not found or access denied",
-            "missing_post_ids": list(missing_ids)
-        }), 404
-    
-    # Queue tasks for all posts
-    job_results = []
-    for post_id in post_ids:
-        task = analyze_post.delay(post_id)
-        job_results.append({
-            "post_id": post_id,
-            "job_id": task.id
+        page = int((request.args.get('page') or '1').strip())
+    except Exception:
+        page = 1
+    if page < 1:
+        page = 1
+
+    try:
+        limit = int((request.args.get('limit') or '20').strip())
+    except Exception:
+        limit = 20
+    if limit < 1:
+        limit = 20
+    if limit > 100:
+        limit = 100
+
+    # Build query with JOIN to companies table
+    query = db.session.query(Post, Company.name).join(
+        Company, Post.company_id == Company.company_id
+    ).filter(
+        Post.tenant_id == tenant_id,
+        Company.tenant_id == tenant_id
+    )
+
+    # Filter by company_id
+    company_id = request.args.get('company_id')
+    if company_id:
+        query = query.filter(Post.company_id == company_id.strip())
+
+    # Filter by start_date
+    start_date = request.args.get('start_date')
+    if start_date:
+        try:
+            date_obj = datetime.strptime(start_date.strip(), '%Y-%m-%d').date()
+            query = query.filter(Post.post_date >= date_obj)
+        except ValueError:
+            # Invalid date format, ignore filter
+            pass
+
+    # Filter by ai_judgement
+    ai_judgement = request.args.get('ai_judgement')
+    if ai_judgement:
+        query = query.filter(Post.ai_judgement == ai_judgement.strip())
+
+    # Get total count before pagination
+    total = query.count()
+
+    # Sort by post_date DESC (newest first) and apply pagination
+    items = (
+        query
+        .order_by(Post.post_date.desc(), Post.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    # Format response
+    posts = []
+    for post, company_name in items:
+        posts.append({
+            "post_id": post.post_id,
+            "company_name": company_name,
+            "post_text": post.post_text,
+            "post_date": post.post_date.isoformat() if post.post_date else None,
+            "score": post.score,
+            "ai_judgement": post.ai_judgement,
         })
-    
+
     return jsonify({
-        "job_ids": [j["job_id"] for j in job_results],
-        "posts": job_results,
-        "count": len(job_results),
-        "status": "queued"
-    }), 202
+        "posts": posts,
+        "page": page,
+        "limit": limit,
+        "total": total
+    }), 200
 
