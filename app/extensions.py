@@ -1,5 +1,6 @@
 from flask_sqlalchemy import SQLAlchemy
 from flask_jwt_extended import JWTManager
+from celery import Celery
 
 """
 Flask Extensions - Initialized here, configured in app/__init__.py
@@ -19,3 +20,8 @@ db = SQLAlchemy()
 # Usage: from app.extensions import jwt
 
 jwt = JWTManager()
+
+# Celery for async tasks
+# Usage: from app.extensions import celery
+
+celery = Celery()

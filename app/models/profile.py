@@ -10,5 +10,4 @@ class Profile(db.Model):
     person_name = db.Column(db.String(255))
     headline = db.Column(db.Text)
     linkedin_url = db.Column(db.Text, nullable=False)
-    status = db.Column(db.String(50), nullable=False, default='url_only')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
