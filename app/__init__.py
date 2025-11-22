@@ -3,6 +3,7 @@ from flask_cors import CORS
 from flask_migrate import Migrate
 from app.config import Config
 from app.extensions import db, jwt
+from app.celery_app import init_celery
 
 migrate = Migrate()
 
@@ -46,6 +47,8 @@ def create_app(config_class=Config):
     app.register_blueprint(templates.bp, url_prefix='/api/templates')
     from app.api import campaigns
     app.register_blueprint(campaigns.bp, url_prefix='/api/campaigns')
+    from app.api import emails
+    app.register_blueprint(emails.bp, url_prefix='/api/emails')
     # Register profiles blueprint if it exists
     try:
         from app.api import profiles
@@ -65,5 +68,7 @@ def create_app(config_class=Config):
     @jwt.expired_token_loader
     def jwt_expired_token(header, payload):
         return jsonify({"error": "Token expired"}), 401
+    
+    init_celery(app)
     
     return app
