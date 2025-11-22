@@ -62,8 +62,9 @@ celery_app.autodiscover_tasks(['app.tasks'])
 # Explicitly import tasks to ensure they're registered
 # This is important because autodiscover might not work if __init__.py is empty
 try:
-    from app.tasks.scraper import scrape_company_posts  # noqa: F401
+    from app.tasks.scraper import scrape_company_posts, scrape_profiles  # noqa: F401
     print("[CELERY CONFIG] Task 'scrape_company_posts' imported and registered")
+    print("[CELERY CONFIG] Task 'scrape_profiles' imported and registered")
 except ImportError as e:
     print(f"[CELERY CONFIG] WARNING: Could not import scraper task: {e}")
 
