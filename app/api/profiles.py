@@ -4,11 +4,190 @@ import io
 from flask import Blueprint, request, jsonify, current_app, Response
 from flask_jwt_extended import jwt_required, get_jwt
 from urllib.parse import urlparse
+from sqlalchemy import or_
 
 from app.extensions import db
 from app.models.profile import Profile
 
 bp = Blueprint('profiles', __name__)
+
+
+def _profile_to_dict(profile):
+    """Convert Profile model to dictionary for API response."""
+    return {
+        "profile_id": profile.profile_id,
+        "tenant_id": profile.tenant_id,
+        "person_name": profile.person_name,
+        "headline": profile.headline,
+        "linkedin_url": profile.linkedin_url,
+        "status": profile.status,
+        "email": profile.email,
+        "phone": profile.phone,
+        "company": profile.company,
+        "job_title": profile.job_title,
+        "location": profile.location,
+        "industry": profile.industry,
+        "scraped_at": profile.scraped_at.isoformat() if profile.scraped_at else None,
+        "created_at": profile.created_at.isoformat() if profile.created_at else None
+    }
+
+
+@bp.route('', methods=['GET'])
+@jwt_required()
+def list_profiles():
+    """
+    List all profiles for the current tenant with filtering, search, pagination, and sorting.
+    
+    Query Parameters:
+        - page: int (default: 1)
+        - limit: int (default: 20, max: 100)
+        - status: str (url_only, scraped, scraping_failed)
+        - company: str (filter by company name)
+        - location: str (filter by location)
+        - industry: str (filter by industry)
+        - search: str (search in person_name, headline, company - case-insensitive, partial match)
+        - sort: str (created_at, person_name, scraped_at - default: created_at)
+        - order: str (asc, desc - default: desc)
+    
+    Returns:
+        - profiles: array of profile objects
+        - pagination: {page, limit, total, pages}
+        - stats: {total, scraped, pending, failed}
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        current_app.logger.warning("List profiles: Missing tenant_id in JWT token")
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_app.logger.debug(f"List profiles: Request for tenant_id={tenant_id}")
+    
+    # Parse pagination parameters
+    try:
+        page = int(request.args.get('page', 1))
+        if page < 1:
+            page = 1
+    except (ValueError, TypeError):
+        page = 1
+        current_app.logger.debug(f"List profiles: Invalid page parameter, defaulting to 1")
+    
+    try:
+        limit = int(request.args.get('limit', 20))
+        if limit < 1:
+            limit = 20
+        if limit > 100:
+            limit = 100
+    except (ValueError, TypeError):
+        limit = 20
+        current_app.logger.debug(f"List profiles: Invalid limit parameter, defaulting to 20")
+    
+    # Parse sorting parameters
+    sort_field = request.args.get('sort', 'created_at').strip().lower()
+    sort_order = request.args.get('order', 'desc').strip().lower()
+    
+    # Validate sort field
+    valid_sort_fields = {'created_at', 'person_name', 'scraped_at'}
+    if sort_field not in valid_sort_fields:
+        sort_field = 'created_at'
+        current_app.logger.debug(f"List profiles: Invalid sort field, defaulting to created_at")
+    
+    # Validate sort order
+    if sort_order not in {'asc', 'desc'}:
+        sort_order = 'desc'
+        current_app.logger.debug(f"List profiles: Invalid sort order, defaulting to desc")
+    
+    # Build base query with tenant filter
+    query = Profile.query.filter_by(tenant_id=tenant_id)
+    
+    # Apply filters
+    status_filter = request.args.get('status', '').strip()
+    if status_filter and status_filter in ['url_only', 'scraped', 'scraping_failed']:
+        query = query.filter(Profile.status == status_filter)
+        current_app.logger.debug(f"List profiles: Applied status filter={status_filter}")
+    
+    company_filter = request.args.get('company', '').strip()
+    if company_filter:
+        query = query.filter(Profile.company.ilike(f'%{company_filter}%'))
+        current_app.logger.debug(f"List profiles: Applied company filter={company_filter}")
+    
+    location_filter = request.args.get('location', '').strip()
+    if location_filter:
+        query = query.filter(Profile.location.ilike(f'%{location_filter}%'))
+        current_app.logger.debug(f"List profiles: Applied location filter={location_filter}")
+    
+    industry_filter = request.args.get('industry', '').strip()
+    if industry_filter:
+        query = query.filter(Profile.industry.ilike(f'%{industry_filter}%'))
+        current_app.logger.debug(f"List profiles: Applied industry filter={industry_filter}")
+    
+    # Apply search (case-insensitive, partial match on person_name, headline, company)
+    search_term = request.args.get('search', '').strip()
+    if search_term:
+        search_pattern = f'%{search_term}%'
+        query = query.filter(
+            or_(
+                Profile.person_name.ilike(search_pattern),
+                Profile.headline.ilike(search_pattern),
+                Profile.company.ilike(search_pattern)
+            )
+        )
+        current_app.logger.debug(f"List profiles: Applied search term={search_term}")
+    
+    # Get total count (with filters applied) for pagination
+    total_count = query.count()
+    
+    # Get stats for all profiles (without filters) - for overall tenant stats
+    # Stats show total counts across all profiles for the tenant
+    all_profiles_query = Profile.query.filter_by(tenant_id=tenant_id)
+    total_all = all_profiles_query.count()
+    scraped_count = all_profiles_query.filter(Profile.status == 'scraped').count()
+    pending_count = all_profiles_query.filter(Profile.status == 'url_only').count()
+    failed_count = all_profiles_query.filter(Profile.status == 'scraping_failed').count()
+    
+    current_app.logger.debug(
+        f"List profiles: Stats - total={total_all}, scraped={scraped_count}, "
+        f"pending={pending_count}, failed={failed_count}"
+    )
+    
+    # Apply sorting
+    sort_column = getattr(Profile, sort_field)
+    if sort_order == 'desc':
+        query = query.order_by(sort_column.desc())
+    else:
+        query = query.order_by(sort_column.asc())
+    
+    current_app.logger.debug(f"List profiles: Sorting by {sort_field} {sort_order}")
+    
+    # Apply pagination
+    offset = (page - 1) * limit
+    profiles = query.offset(offset).limit(limit).all()
+    
+    current_app.logger.debug(
+        f"List profiles: Returning page={page}, limit={limit}, "
+        f"total={total_count}, profiles_returned={len(profiles)}"
+    )
+    
+    # Calculate total pages
+    total_pages = (total_count + limit - 1) // limit if total_count > 0 else 0
+    
+    # Convert profiles to dictionaries
+    profiles_data = [_profile_to_dict(profile) for profile in profiles]
+    
+    return jsonify({
+        "profiles": profiles_data,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total_count,
+            "pages": total_pages
+        },
+        "stats": {
+            "total": total_all,
+            "scraped": scraped_count,
+            "pending": pending_count,
+            "failed": failed_count
+        }
+    }), 200
 
 
 def _normalize_linkedin_url(raw_url: str):
