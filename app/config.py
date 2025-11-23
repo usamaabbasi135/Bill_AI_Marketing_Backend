@@ -25,4 +25,5 @@ class Config:
     
     # Apify Configuration
     APIFY_API_TOKEN = os.getenv('APIFY_API_TOKEN')
-    APIFY_ACTOR_ID = 'apimaestro/linkedin-company-posts'
+    APIFY_ACTOR_ID = os.getenv('APIFY_ACTOR_ID', 'apimaestro/linkedin-company-posts')
+    APIFY_PROFILE_ACTOR_ID = os.getenv('APIFY_PROFILE_ACTOR_ID', 'apify/unlimited-leads-linkedin')  # For profile scraping
