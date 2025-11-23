@@ -430,7 +430,242 @@ curl -X DELETE http://localhost:5000/api/companies/<COMPANY_ID> \
 
 ---
 
-## Posts Endpoints (Coming Soon)
+### Scrape Company Posts
+Trigger LinkedIn post scraping for a company using Apify. This is an asynchronous operation that returns immediately with a job_id. The actual scraping runs in the background via Celery, and scraped posts are saved to the database.
+
+**Endpoint:** `POST /api/companies/{company_id}/scrape`
+
+**Auth Required:** Yes (Bearer access token)
+
+**Parameters:**
+- `max_posts` (int, optional): Maximum number of posts to scrape (1-1000, default: 100)
+  - Can be provided as query parameter: `?max_posts=5`
+  - Or in request body: `{"max_posts": 5}`
+
+**Request Body (Optional):**
+```json
+{
+  "max_posts": 10
+}
+```
+
+**Validation Rules:**
+- Company must exist and belong to your tenant
+- Company must be active (`is_active=true`)
+- `max_posts` must be between 1 and 1000 (if provided)
+
+**Success Response (202 Accepted):**
+```json
+{
+  "message": "Scraping job started",
+  "job_id": "679cf832-fe27-47ac-81d3-10ecd853bcce",
+  "company_id": "2203cefa-abc7-4d6e-b98c-f8df028931c5",
+  "max_posts": 5,
+  "status_url": "/api/jobs/679cf832-fe27-47ac-81d3-10ecd853bcce"
+}
+```
+
+**Error Responses:**
+```json
+// 401 - Missing/invalid token
+{
+  "error": "Unauthorized"
+}
+
+// 400 - Company is inactive
+{
+  "error": "Company is inactive"
+}
+
+// 400 - Invalid max_posts
+{
+  "error": "max_posts must be a valid integer"
+}
+
+// 403 - Company belongs to different tenant
+{
+  "error": "Forbidden"
+}
+
+// 404 - Company not found
+{
+  "error": "Company not found"
+}
+
+// 500 - Failed to start scraping job (Celery not running)
+{
+  "error": "Failed to start scraping job",
+  "details": "..."
+}
+```
+
+**cURL Examples:**
+
+**Using Query Parameter:**
+```bash
+curl -X POST "http://localhost:5000/api/companies/<COMPANY_ID>/scrape?max_posts=5" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
+```
+
+**Using Request Body:**
+```bash
+curl -X POST "http://localhost:5000/api/companies/<COMPANY_ID>/scrape" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"max_posts": 10}'
+```
+
+**Notes:**
+- This endpoint returns immediately with a `job_id`. The actual scraping happens asynchronously.
+- Scraped posts are automatically saved to the `posts` table.
+- The company's `last_scraped_at` timestamp is updated when scraping completes.
+- Duplicate posts (same `source_url`) are skipped - existing posts are updated instead.
+- Make sure Celery worker is running for the scraping to execute.
+
+---
+
+## Posts Endpoints
+
+### Analyze Single Post
+Analyze a LinkedIn post using Claude AI to detect product launches. Returns a job ID for async tracking.
+
+**Endpoint:** `POST /api/posts/{post_id}/analyze`
+
+**Auth Required:** Yes (Bearer access token)
+
+**Path Parameters:**
+- `post_id` (string, required) - UUID of the post to analyze
+
+**Success Response (202 Accepted):**
+```json
+{
+  "job_id": "celery-task-uuid-123",
+  "post_id": "post-uuid-456",
+  "status": "queued"
+}
+```
+
+**Error Responses:**
+```json
+// 401 - Missing/invalid token
+{
+  "error": "Unauthorized"
+}
+
+// 404 - Post not found or doesn't belong to tenant
+{
+  "error": "Post not found"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:5000/api/posts/{post_id}/analyze \
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
+```
+
+**Notes:**
+- Analysis runs asynchronously via Celery
+- Use the `job_id` to track task status
+- Results update the post's `score` (0-100), `ai_judgement` ("product_launch" or "other"), and `analyzed_at` timestamp
+- Check task status using Celery's result backend or query the post after completion
+
+---
+
+### Batch Analyze Posts
+Analyze multiple posts in a single request. Returns job IDs for each post.
+
+**Endpoint:** `POST /api/posts/analyze-batch`
+
+**Auth Required:** Yes (Bearer access token)
+
+**Request Body:**
+```json
+{
+  "post_ids": [
+    "post-uuid-1",
+    "post-uuid-2",
+    "post-uuid-3"
+  ]
+}
+```
+
+**Validation Rules:**
+- `post_ids`: Array of strings (required)
+- Minimum 1 post ID
+- Maximum 100 post IDs per request
+- All post IDs must belong to the authenticated tenant
+
+**Success Response (202 Accepted):**
+```json
+{
+  "job_ids": [
+    "celery-task-uuid-1",
+    "celery-task-uuid-2",
+    "celery-task-uuid-3"
+  ],
+  "posts": [
+    {
+      "post_id": "post-uuid-1",
+      "job_id": "celery-task-uuid-1"
+    },
+    {
+      "post_id": "post-uuid-2",
+      "job_id": "celery-task-uuid-2"
+    },
+    {
+      "post_id": "post-uuid-3",
+      "job_id": "celery-task-uuid-3"
+    }
+  ],
+  "count": 3,
+  "status": "queued"
+}
+```
+
+**Error Responses:**
+```json
+// 401 - Missing/invalid token
+{
+  "error": "Unauthorized"
+}
+
+// 400 - Validation error
+{
+  "error": "Validation failed",
+  "details": {
+    "post_ids": ["Cannot analyze more than 100 posts at once"]
+  }
+}
+
+// 404 - Some posts not found or don't belong to tenant
+{
+  "error": "Some posts not found or access denied",
+  "missing_post_ids": ["post-uuid-4", "post-uuid-5"]
+}
+```
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:5000/api/posts/analyze-batch \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -d '{
+    "post_ids": [
+      "post-uuid-1",
+      "post-uuid-2",
+      "post-uuid-3"
+    ]
+  }'
+```
+
+**Notes:**
+- All posts are queued for analysis asynchronously
+- Each post gets its own Celery task
+- If any post IDs are invalid or don't belong to the tenant, the entire request fails with 404
+- Results are updated in the database when analysis completes
+
+---
 
 ### List Posts
 **Endpoint:** `GET /api/posts`
@@ -533,9 +768,12 @@ See: [Database Documentation](DATABASE.md)
 - Multi-tenant support
 -  JWT authentication
 
+### 2025-01-27
+- POST /api/posts/{post_id}/analyze - Analyze single post with Claude AI
+- POST /api/posts/analyze-batch - Batch analyze multiple posts
+- Celery integration for async AI analysis
+- Claude AI integration for product launch detection
+
 ### Coming Soon
-- POST /api/auth/login
-- POST /api/auth/refresh
-- Company management endpoints
-- Post detection endpoints
+- GET /api/posts - List posts with filtering
 - Email generation endpoints
