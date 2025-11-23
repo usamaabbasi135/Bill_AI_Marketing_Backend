@@ -14,3 +14,9 @@ class Email(db.Model):
     recipients = db.Column(db.Text)
     status = db.Column(db.String(50), default='draft')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_at = db.Column(db.DateTime, nullable=True)  # Soft delete timestamp
+    
+    # Relationships
+    template = db.relationship('EmailTemplate', backref='emails')
+    post = db.relationship('Post', backref='emails')
+    profile = db.relationship('Profile', backref='emails')
