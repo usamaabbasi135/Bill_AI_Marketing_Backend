@@ -18,25 +18,6 @@ def create_app(config_class=Config):
     migrate.init_app(app, db)
     CORS(app)
     
-    # Initialize Celery (using environment variables directly, not from config)
-    redis_url = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
-    celery.conf.update(
-        broker_url=redis_url,
-        result_backend=redis_url,
-        accept_content=['json'],
-        task_serializer='json',
-        result_serializer='json',
-        timezone='UTC',
-    )
-    
-    # Make Celery aware of Flask app context
-    class ContextTask(celery.Task):
-        def __call__(self, *args, **kwargs):
-            with app.app_context():
-                return self.run(*args, **kwargs)
-    
-    celery.Task = ContextTask
-    
     # Health check endpoint - register early so it's always available
     @app.route('/api/health', methods=['GET'])
     def health():
