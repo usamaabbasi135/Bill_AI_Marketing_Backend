@@ -10,6 +10,7 @@ class Email(db.Model):
     post_id = db.Column(db.String(36), db.ForeignKey('posts.post_id', ondelete='CASCADE'), nullable=False)
     profile_id = db.Column(db.String(36), db.ForeignKey('profiles.profile_id'))
     template_id = db.Column(db.String(36), db.ForeignKey('email_templates.template_id', ondelete='SET NULL'), nullable=True)
+    template_id = db.Column(db.String(36), db.ForeignKey('email_templates.template_id'), nullable=True)
     subject = db.Column(db.String(500), nullable=False)
     body = db.Column(db.Text, nullable=False)
     recipients = db.Column(db.Text)

@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from flask_jwt_extended import jwt_required, get_jwt
+from flask_jwt_extended import jwt_required, get_jwt, get_jwt_identity
 from marshmallow import Schema, fields, validates, ValidationError
 from datetime import datetime
 
@@ -279,7 +279,76 @@ def delete_campaign(campaign_id):
 
     db.session.delete(campaign)
     db.session.commit()
-
+    
     return jsonify({"message": "Campaign deleted successfully"}), 200
+
+
+@bp.route('/<campaign_id>/generate-emails', methods=['POST'])
+@jwt_required()
+def generate_campaign_emails(campaign_id):
+    """
+    Generate emails for all profiles in a campaign (async task).
+    
+    Request Body:
+        {
+            "template_id": "template-uuid"
+        }
+    
+    Returns:
+        202 Accepted with job_id
+    """
+    from marshmallow import Schema, fields, ValidationError
+    from app.models.email_template import EmailTemplate
+    from app.tasks.email_tasks import generate_campaign_emails_task
+    
+    class GenerateCampaignEmailsSchema(Schema):
+        template_id = fields.Str(required=True, error_messages={"required": "template_id is required"})
+    
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_user_id = get_jwt_identity()
+    
+    # Validate campaign exists and belongs to tenant
+    campaign = Campaign.query.filter_by(campaign_id=campaign_id).first()
+    if not campaign:
+        return jsonify({"error": "Campaign not found"}), 404
+    
+    if campaign.tenant_id != tenant_id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    data = request.get_json() or {}
+    
+    try:
+        validated = GenerateCampaignEmailsSchema().load(data)
+    except ValidationError as err:
+        return jsonify({"error": "Validation failed", "details": err.messages}), 400
+    
+    template_id = validated['template_id']
+    
+    # Validate template exists and belongs to tenant (or is default)
+    template = EmailTemplate.query.filter(
+        EmailTemplate.template_id == template_id,
+        (EmailTemplate.tenant_id == tenant_id) | (EmailTemplate.is_default == True)
+    ).first()
+    
+    if not template:
+        return jsonify({"error": "Template not found"}), 404
+    
+    # Start async task
+    task = generate_campaign_emails_task.delay(
+        campaign_id=campaign_id,
+        template_id=template_id,
+        tenant_id=tenant_id,
+        user_id=current_user_id
+    )
+    
+    return jsonify({
+        "message": "Email generation started",
+        "job_id": task.id,
+        "campaign_id": campaign_id
+    }), 202
 
 

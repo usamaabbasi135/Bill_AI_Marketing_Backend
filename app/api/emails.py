@@ -88,6 +88,17 @@ def email_to_dict(email, include_full_details=False):
             }
     
     return data
+def email_to_dict(email):
+    """Convert Email model to dictionary."""
+    return {
+        "email_id": email.email_id,
+        "post_id": email.post_id,
+        "profile_id": email.profile_id,
+        "subject": email.subject,
+        "body": email.body,
+        "status": email.status,
+        "created_at": email.created_at.isoformat() if email.created_at else None
+    }
 
 
 @bp.route('/generate', methods=['POST'])
