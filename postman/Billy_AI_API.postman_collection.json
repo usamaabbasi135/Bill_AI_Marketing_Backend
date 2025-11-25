@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Billy AI Marketing API",
-    "description": "Complete API collection for LinkedIn Product Launch detection and email outreach automation. Includes all authentication and company management endpoints.",
+    "description": "Complete API collection for LinkedIn Product Launch detection and email outreach automation. Includes authentication, company management, profile management, job tracking, and all API endpoints.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -22,6 +22,31 @@
     },
     {
       "key": "company_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "profile_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "job_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "template_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "campaign_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "post_id",
       "value": "",
       "type": "string"
     }
@@ -376,6 +401,723 @@
               "path": ["api", "companies", "{{company_id}}", "scrape"]
             },
             "description": "Trigger LinkedIn post scraping with max_posts in request body instead of query parameter."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Profiles",
+      "item": [
+        {
+          "name": "Add Single Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('profile_id', jsonData.profile.profile_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"linkedin_url\": \"https://www.linkedin.com/in/johndoe/\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles"]
+            },
+            "description": "Add a single LinkedIn profile URL manually. URL is validated and normalized. Returns profile_id."
+          }
+        },
+        {
+          "name": "List Profiles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Items per page (default: 20, max: 100)"
+                },
+                {
+                  "key": "status",
+                  "value": "scraped",
+                  "description": "Filter by status: url_only, scraped, scraping_failed",
+                  "disabled": true
+                },
+                {
+                  "key": "company",
+                  "value": "",
+                  "description": "Filter by company name (partial match, case-insensitive)",
+                  "disabled": true
+                },
+                {
+                  "key": "location",
+                  "value": "",
+                  "description": "Filter by location (partial match, case-insensitive)",
+                  "disabled": true
+                },
+                {
+                  "key": "industry",
+                  "value": "",
+                  "description": "Filter by industry (partial match, case-insensitive)",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "description": "Search in person_name, headline, company (case-insensitive, partial match)",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "created_at",
+                  "description": "Sort field: created_at, person_name, scraped_at (default: created_at)",
+                  "disabled": true
+                },
+                {
+                  "key": "order",
+                  "value": "desc",
+                  "description": "Sort order: asc, desc (default: desc)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all profiles for your tenant with filtering, search, pagination, and sorting. Returns profiles array, pagination metadata, and stats (total, scraped, pending, failed)."
+          }
+        },
+        {
+          "name": "List Profiles - Filter by Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles?status=scraped",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "scraped"
+                }
+              ]
+            },
+            "description": "List only scraped profiles."
+          }
+        },
+        {
+          "name": "List Profiles - Search",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles?search=John",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles"],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "John"
+                }
+              ]
+            },
+            "description": "Search profiles by name, headline, or company."
+          }
+        },
+        {
+          "name": "List Profiles - Combined Filters",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles?status=scraped&company=Tech&location=San Francisco&page=1&limit=20&sort=scraped_at&order=desc",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "scraped"
+                },
+                {
+                  "key": "company",
+                  "value": "Tech"
+                },
+                {
+                  "key": "location",
+                  "value": "San Francisco"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "sort",
+                  "value": "scraped_at"
+                },
+                {
+                  "key": "order",
+                  "value": "desc"
+                }
+              ]
+            },
+            "description": "Example of combined filters: status, company, location with pagination and sorting."
+          }
+        },
+        {
+          "name": "Bulk Upload Profiles (CSV)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "CSV file with LinkedIn profile URLs. First column should be linkedin_url. Optional columns: name, notes."
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles/bulk-upload",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles", "bulk-upload"]
+            },
+            "description": "Upload multiple LinkedIn profile URLs via CSV file. Maximum 1000 profiles per upload. CSV can have header row with 'linkedin_url' and optional 'name' column, or just URLs in first column."
+          }
+        },
+        {
+          "name": "Download Bulk Upload Template",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles/bulk-upload/template",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles", "bulk-upload", "template"]
+            },
+            "description": "Download CSV template for bulk profile uploads. Template includes example row with linkedin_url, name, and notes columns."
+          }
+        },
+        {
+          "name": "Scrape All Profiles",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('job_id', jsonData.job_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles/scrape",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles", "scrape"]
+            },
+            "description": "Scrape all profiles with status='url_only' for your tenant. Returns job_id immediately (async task). Processes up to 50 profiles per job. Use job_id to check status via GET /api/jobs/{job_id}."
+          }
+        },
+        {
+          "name": "Scrape Single Profile",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('job_id', jsonData.job_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles/{{profile_id}}/scrape",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles", "{{profile_id}}", "scrape"]
+            },
+            "description": "Scrape a single profile by ID. Returns job_id immediately (async task). Use job_id to check status via GET /api/jobs/{job_id}."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "Get Job Status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/jobs/{{job_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "jobs", "{{job_id}}"]
+            },
+            "description": "Get the status of an async job (e.g., profile scraping, post scraping). Returns job details including status (pending, processing, completed, failed), progress, results, and error messages if any. Must own the job (same tenant)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Templates",
+      "item": [
+        {
+          "name": "List Templates",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/templates",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "templates"]
+            },
+            "description": "List all email templates (default templates + your custom templates). Returns templates with detected variables."
+          }
+        },
+        {
+          "name": "Get Template by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/templates/00000000-0000-0000-0000-000000000001",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "templates", "00000000-0000-0000-0000-000000000001"]
+            },
+            "description": "Get a single template by ID. Default templates are visible to all tenants. Custom templates only visible to owner."
+          }
+        },
+        {
+          "name": "Create Custom Template",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"My Custom Template\",\n  \"subject\": \"Hello {{recipient_name}}\",\n  \"body\": \"Hi {{recipient_name}}, this is a custom email from {{sender_name}} about {{product_name}}.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/templates",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "templates"]
+            },
+            "description": "Create a custom email template for your tenant. Supported variables: {{recipient_name}}, {{company_name}}, {{product_name}}, {{sender_name}}, {{post_summary}}"
+          }
+        },
+        {
+          "name": "Update Template",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Template Name\",\n  \"subject\": \"Updated: Hello {{recipient_name}}\",\n  \"body\": \"Updated body text\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/templates/{{template_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "templates", "{{template_id}}"]
+            },
+            "description": "Update a custom template (name, subject, body). Cannot update default templates. Only owner can update."
+          }
+        },
+        {
+          "name": "Delete Template",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/templates/{{template_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "templates", "{{template_id}}"]
+            },
+            "description": "Delete a custom template. Cannot delete default templates. Only owner can delete."
+          }
+        },
+        {
+          "name": "Preview Template",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"recipient_name\": \"John Doe\",\n  \"company_name\": \"Acme Corp\",\n  \"product_name\": \"New Product\",\n  \"sender_name\": \"Jane Smith\",\n  \"post_summary\": \"Exciting new launch!\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/templates/00000000-0000-0000-0000-000000000001/preview",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "templates", "00000000-0000-0000-0000-000000000001", "preview"]
+            },
+            "description": "Preview a template with sample data. Replaces all placeholders with provided values. Returns rendered subject and body."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Campaigns",
+      "item": [
+        {
+          "name": "List Campaigns",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/campaigns?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "campaigns"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "List all campaigns for your tenant with pagination."
+          }
+        },
+        {
+          "name": "Get Campaign by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/campaigns/{{campaign_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}"]
+            },
+            "description": "Get a single campaign by ID with profile details."
+          }
+        },
+        {
+          "name": "Create Campaign",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('campaign_id', jsonData.campaign.campaign_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Product Launch Campaign\",\n  \"post_id\": \"{{post_id}}\",\n  \"profile_ids\": [\"{{profile_id}}\"],\n  \"status\": \"draft\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/campaigns",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "campaigns"]
+            },
+            "description": "Create a new campaign linking a post with profiles. Requires valid post_id and at least one profile_id. Status: draft, active, or completed."
+          }
+        },
+        {
+          "name": "Delete Campaign",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/campaigns/{{campaign_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}"]
+            },
+            "description": "Delete a campaign. Only owner can delete."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Emails",
+      "item": [
+        {
+          "name": "List Emails",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/emails?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "emails"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "status",
+                  "value": "draft",
+                  "description": "Filter by status: draft, sent, failed",
+                  "disabled": true
+                },
+                {
+                  "key": "search",
+                  "value": "",
+                  "description": "Search in subject and recipient name",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List all emails for your tenant with filtering, pagination, and search. Only non-deleted emails are returned."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Posts",
+      "item": [
+        {
+          "name": "Analyze Single Post",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('job_id', jsonData.job_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/{{post_id}}/analyze",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "posts", "{{post_id}}", "analyze"]
+            },
+            "description": "Analyze a single post using Claude AI. Returns job_id immediately (async task). Use job_id to check status via GET /api/jobs/{job_id}."
+          }
+        },
+        {
+          "name": "Analyze Batch Posts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var jsonData = pm.response.json();",
+                  "    if (jsonData.job_ids && jsonData.job_ids.length > 0) {",
+                  "        pm.collectionVariables.set('job_id', jsonData.job_ids[0]);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"post_ids\": [\"{{post_id}}\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/analyze-batch",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "posts", "analyze-batch"]
+            },
+            "description": "Analyze multiple posts in batch. Maximum 100 posts per batch. Returns job_ids for tracking."
           }
         }
       ]
