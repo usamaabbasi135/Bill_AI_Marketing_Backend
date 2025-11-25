@@ -9,7 +9,11 @@ from app.models.profile import Profile
 from app.models.user import User
 from app.models.campaign import Campaign, CampaignProfile
 from app.services.email_generation import generate_email_record
+from sqlalchemy import or_, and_
+from sqlalchemy.orm import joinedload
+from datetime import datetime
 import uuid
+import math
 
 bp = Blueprint('emails', __name__)
 
@@ -23,6 +27,67 @@ class GenerateEmailSchema(Schema):
 generate_email_schema = GenerateEmailSchema()
 
 
+def email_to_dict(email, include_full_details=False):
+    """Convert Email model to dictionary with related data."""
+    data = {
+        "email_id": email.email_id,
+        "subject": email.subject,
+        "status": email.status,
+        "created_at": email.created_at.isoformat() if email.created_at else None
+    }
+    
+    if include_full_details:
+        data["body"] = email.body
+        data["post_id"] = email.post_id
+        data["profile_id"] = email.profile_id
+        data["template_id"] = email.template_id
+        
+        # Include post details
+        if email.post:
+            data["post"] = {
+                "post_id": email.post.post_id,
+                "company_name": email.post.company.name if email.post.company else None,
+                "post_text": email.post.post_text
+            }
+        
+        # Include profile details
+        if email.profile:
+            data["profile"] = {
+                "profile_id": email.profile.profile_id,
+                "person_name": email.profile.person_name,
+                "headline": email.profile.headline
+            }
+        
+        # Find campaign through CampaignProfile
+        campaign_profile = CampaignProfile.query.filter_by(email_id=email.email_id).first()
+        if campaign_profile and campaign_profile.campaign:
+            data["campaign"] = {
+                "campaign_id": campaign_profile.campaign.campaign_id,
+                "name": campaign_profile.campaign.name
+            }
+    else:
+        # List view - include summary info
+        if email.post and email.post.company:
+            data["post"] = {
+                "post_id": email.post.post_id,
+                "company_name": email.post.company.name
+            }
+        
+        if email.profile:
+            data["profile"] = {
+                "profile_id": email.profile.profile_id,
+                "person_name": email.profile.person_name
+            }
+        
+        # Find campaign
+        campaign_profile = CampaignProfile.query.filter_by(email_id=email.email_id).first()
+        if campaign_profile and campaign_profile.campaign:
+            data["campaign"] = {
+                "campaign_id": campaign_profile.campaign.campaign_id,
+                "name": campaign_profile.campaign.name
+            }
+    
+    return data
 def email_to_dict(email):
     """Convert Email model to dictionary."""
     return {
@@ -115,4 +180,273 @@ def generate_email():
         return jsonify({"error": "Failed to generate email", "details": str(e)}), 500
 
 
+class UpdateEmailSchema(Schema):
+    subject = fields.Str(validate=lambda x: len(x) <= 500, error_messages={"validator_failed": "Subject must be max 500 characters"})
+    body = fields.Str(validate=lambda x: len(x) <= 10000, error_messages={"validator_failed": "Body must be max 10000 characters"})
+    status = fields.Str()
+    
+    @validates('status')
+    def validate_status(self, value):
+        valid_statuses = ['draft', 'sent', 'failed']
+        if value not in valid_statuses:
+            raise ValidationError(f"Status must be one of: {', '.join(valid_statuses)}")
+
+
+update_email_schema = UpdateEmailSchema()
+
+
+@bp.route('', methods=['GET'])
+@jwt_required()
+def list_emails():
+    """
+    List all emails for the tenant with filtering, pagination, and search.
+    
+    Query Parameters:
+        - page: Page number (default: 1)
+        - limit: Items per page (default: 20)
+        - status: Filter by status (draft, sent, failed)
+        - post_id: Filter by post
+        - profile_id: Filter by profile
+        - campaign_id: Filter by campaign
+        - search: Search in subject and recipient name
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    # Get query parameters
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 20, type=int)
+    status = request.args.get('status')
+    post_id = request.args.get('post_id')
+    profile_id = request.args.get('profile_id')
+    campaign_id = request.args.get('campaign_id')
+    search = request.args.get('search', '').strip()
+    
+    # Validate pagination
+    if page < 1:
+        page = 1
+    if limit < 1 or limit > 100:
+        limit = 20
+    
+    # Base query - only non-deleted emails for tenant
+    query = Email.query.filter(
+        Email.tenant_id == tenant_id,
+        Email.deleted_at.is_(None)
+    )
+    
+    # Track if we need to join Profile for search
+    needs_profile_join = bool(search)
+    needs_campaign_join = bool(campaign_id)
+    
+    # Join Profile if needed for search
+    if needs_profile_join:
+        query = query.join(Profile, Email.profile_id == Profile.profile_id, isouter=True)
+    
+    # Join CampaignProfile if needed for campaign filter
+    if needs_campaign_join:
+        query = query.join(
+            CampaignProfile,
+            and_(
+                CampaignProfile.email_id == Email.email_id,
+                CampaignProfile.campaign_id == campaign_id
+            ),
+            isouter=False
+        )
+    
+    # Apply filters
+    if status:
+        query = query.filter(Email.status == status)
+    
+    if post_id:
+        query = query.filter(Email.post_id == post_id)
+    
+    if profile_id:
+        query = query.filter(Email.profile_id == profile_id)
+    
+    if search:
+        # Search in subject and profile name
+        search_pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                Email.subject.ilike(search_pattern),
+                Profile.person_name.ilike(search_pattern)
+            )
+        )
+    
+    # Sort by created_at DESC (newest first)
+    query = query.order_by(Email.created_at.desc())
+    
+    # Eager load relationships to avoid N+1 queries
+    query = query.options(
+        joinedload(Email.post).joinedload(Post.company),
+        joinedload(Email.profile)
+    )
+    
+    # Get total count before pagination (need to count before eager loading)
+    total_query = Email.query.filter(
+        Email.tenant_id == tenant_id,
+        Email.deleted_at.is_(None)
+    )
+    if status:
+        total_query = total_query.filter(Email.status == status)
+    if post_id:
+        total_query = total_query.filter(Email.post_id == post_id)
+    if profile_id:
+        total_query = total_query.filter(Email.profile_id == profile_id)
+    if campaign_id:
+        total_query = total_query.join(
+            CampaignProfile,
+            and_(
+                CampaignProfile.email_id == Email.email_id,
+                CampaignProfile.campaign_id == campaign_id
+            ),
+            isouter=False
+        )
+    if search:
+        total_query = total_query.join(Profile, Email.profile_id == Profile.profile_id, isouter=True).filter(
+            or_(
+                Email.subject.ilike(f"%{search}%"),
+                Profile.person_name.ilike(f"%{search}%")
+            )
+        )
+    total = total_query.count()
+    
+    # Apply pagination
+    offset = (page - 1) * limit
+    emails = query.offset(offset).limit(limit).all()
+    
+    # Calculate total pages
+    total_pages = math.ceil(total / limit) if total > 0 else 0
+    
+    return jsonify({
+        "emails": [email_to_dict(email, include_full_details=False) for email in emails],
+        "pagination": {
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": total_pages
+        }
+    }), 200
+
+
+@bp.route('/<email_id>', methods=['GET'])
+@jwt_required()
+def get_email(email_id):
+    """
+    Get single email details with related data.
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    # Eager load relationships
+    email = Email.query.options(
+        joinedload(Email.post).joinedload(Post.company),
+        joinedload(Email.profile)
+    ).filter_by(email_id=email_id).first()
+    
+    if not email:
+        return jsonify({"error": "Email not found"}), 404
+    
+    if email.tenant_id != tenant_id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    if email.deleted_at:
+        return jsonify({"error": "Email not found"}), 404
+    
+    return jsonify({"email": email_to_dict(email, include_full_details=True)}), 200
+
+
+@bp.route('/<email_id>', methods=['PATCH'])
+@jwt_required()
+def update_email(email_id):
+    """
+    Update email (subject, body, status).
+    Cannot update if status='sent'.
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    email = Email.query.filter_by(email_id=email_id).first()
+    
+    if not email:
+        return jsonify({"error": "Email not found"}), 404
+    
+    if email.tenant_id != tenant_id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    if email.deleted_at:
+        return jsonify({"error": "Email not found"}), 404
+    
+    # Cannot update sent emails
+    if email.status == 'sent':
+        return jsonify({"error": "Cannot update sent email"}), 400
+    
+    data = request.get_json() or {}
+    
+    try:
+        validated = update_email_schema.load(data, partial=True)
+    except ValidationError as err:
+        return jsonify({"error": "Validation failed", "details": err.messages}), 400
+    
+    # Update fields
+    if 'subject' in validated:
+        if len(validated['subject']) > 500:
+            return jsonify({"error": "Subject must be max 500 characters"}), 400
+        email.subject = validated['subject']
+    
+    if 'body' in validated:
+        if len(validated['body']) > 10000:
+            return jsonify({"error": "Body must be max 10000 characters"}), 400
+        email.body = validated['body']
+    
+    if 'status' in validated:
+        new_status = validated['status']
+        # Cannot change from sent to draft
+        if email.status == 'sent' and new_status == 'draft':
+            return jsonify({"error": "Cannot change sent email to draft"}), 400
+        email.status = new_status
+    
+    db.session.commit()
+    
+    return jsonify({"email": email_to_dict(email, include_full_details=True)}), 200
+
+
+@bp.route('/<email_id>', methods=['DELETE'])
+@jwt_required()
+def delete_email(email_id):
+    """
+    Soft delete email (sets deleted_at timestamp).
+    Cannot delete if status='sent'.
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    email = Email.query.filter_by(email_id=email_id).first()
+    
+    if not email:
+        return jsonify({"error": "Email not found"}), 404
+    
+    if email.tenant_id != tenant_id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    if email.deleted_at:
+        return jsonify({"error": "Email not found"}), 404
+    
+    # Cannot delete sent emails
+    if email.status == 'sent':
+        return jsonify({"error": "Cannot delete sent email"}), 400
+    
+    # Soft delete
+    email.deleted_at = datetime.utcnow()
+    db.session.commit()
+    
+    return jsonify({"message": "Email deleted successfully"}), 200
 

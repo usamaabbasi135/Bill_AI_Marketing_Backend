@@ -54,6 +54,7 @@ def create_app(config_class=Config):
         EmailTemplate,
         Campaign,
         CampaignProfile,
+        Job,
     )
     
     # Register blueprints

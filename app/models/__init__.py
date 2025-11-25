@@ -7,3 +7,4 @@ from app.models.email import Email
 from app.models.tenant_setting import TenantSetting
 from app.models.email_template import EmailTemplate
 from app.models.campaign import Campaign, CampaignProfile
+from app.models.job import Job
