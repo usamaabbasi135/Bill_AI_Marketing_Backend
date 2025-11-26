@@ -352,3 +352,43 @@ def generate_campaign_emails(campaign_id):
     }), 202
 
 
+@bp.route('/<campaign_id>/send-emails', methods=['POST'])
+@jwt_required()
+def send_campaign_emails(campaign_id):
+    """
+    Send all draft emails in a campaign via AWS SES (async).
+    
+    Returns:
+        202 Accepted with job_id
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    # Validate campaign exists and belongs to tenant
+    campaign = Campaign.query.filter_by(campaign_id=campaign_id).first()
+    if not campaign:
+        return jsonify({"error": "Campaign not found"}), 404
+    
+    if campaign.tenant_id != tenant_id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    # Validate AWS SES configuration
+    try:
+        from app.services.email_sender import get_ses_client
+        get_ses_client()
+    except ValueError as e:
+        return jsonify({"error": "AWS SES configuration error", "details": str(e)}), 500
+    
+    # Start async task
+    from app.tasks.email_sender_tasks import send_campaign_emails_task
+    task = send_campaign_emails_task.delay(campaign_id=campaign_id, tenant_id=tenant_id)
+    
+    return jsonify({
+        "message": "Campaign email sending started",
+        "job_id": task.id,
+        "campaign_id": campaign_id
+    }), 202
+
+

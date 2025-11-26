@@ -30,3 +30,9 @@ class Config:
      # Apify Configuration
     APIFY_API_TOKEN = os.getenv('APIFY_API_TOKEN')
     APIFY_ACTOR_ID = 'apimaestro/linkedin-company-posts'
+    
+    # AWS SES Configuration
+    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
+    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
+    AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')
+    SES_SENDER_EMAIL = os.getenv('SES_SENDER_EMAIL')
