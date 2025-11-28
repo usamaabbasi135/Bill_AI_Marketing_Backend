@@ -447,6 +447,64 @@ def delete_email(email_id):
     # Soft delete
     email.deleted_at = datetime.utcnow()
     db.session.commit()
-    
+
     return jsonify({"message": "Email deleted successfully"}), 200
+
+
+@bp.route('/<email_id>/send', methods=['POST'])
+@jwt_required()
+def send_email(email_id):
+    """
+    Send a single email via AWS SES (async).
+    
+    Returns:
+        202 Accepted with job_id
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    # Validate email exists and belongs to tenant
+    email = Email.query.filter_by(email_id=email_id).first()
+    if not email:
+        return jsonify({"error": "Email not found"}), 404
+    
+    if email.tenant_id != tenant_id:
+        return jsonify({"error": "Forbidden"}), 403
+    
+    if email.deleted_at:
+        return jsonify({"error": "Email not found"}), 404
+    
+    # Validate email status
+    if email.status != 'draft':
+        return jsonify({"error": "Email already sent"}), 400
+    
+    # Validate recipient has email address
+    if not email.profile_id:
+        return jsonify({"error": "Email has no associated profile"}), 400
+    
+    profile = Profile.query.filter_by(profile_id=email.profile_id, tenant_id=tenant_id).first()
+    if not profile:
+        return jsonify({"error": "Profile not found"}), 404
+    
+    if not profile.email or not profile.email.strip():
+        return jsonify({"error": "Recipient email not found"}), 400
+    
+    # Validate AWS SES configuration
+    try:
+        from app.services.email_sender import get_ses_client
+        get_ses_client()
+    except ValueError as e:
+        return jsonify({"error": "AWS SES configuration error", "details": str(e)}), 500
+    
+    # Start async task
+    from app.tasks.email_sender_tasks import send_single_email_task
+    task = send_single_email_task.delay(email_id=email_id, tenant_id=tenant_id)
+    
+    return jsonify({
+        "message": "Email sending started",
+        "job_id": task.id,
+        "email_id": email_id
+    }), 202
 

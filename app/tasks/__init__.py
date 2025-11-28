@@ -34,3 +34,9 @@ try:
 except ImportError:
     pass
 
+try:
+    from app.tasks.email_sender_tasks import send_single_email_task, send_campaign_emails_task
+    __all__.extend(['send_single_email_task', 'send_campaign_emails_task'])
+except ImportError:
+    pass
+
