@@ -21,6 +21,7 @@ from app.tasks.celery_app import celery_app
 # This ensures the @celery_app.task decorators are executed
 from app.tasks import scraper  # noqa: F401
 from app.tasks import ai_analyzer  # noqa: F401
+from app.tasks import email_sender_tasks  # noqa: F401
 from app.tasks import email_tasks  # noqa: F401
 
 # This makes the celery_app available for command line
