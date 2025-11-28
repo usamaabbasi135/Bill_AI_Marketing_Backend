@@ -1,7 +1,7 @@
 """add analyzed_at to posts
 
-Revision ID: 3a4b5c6d7e8f
-Revises: 2ddb63f4447f
+Revision ID: 7f8e9d0c1b2a
+Revises: 3a4b5c6d7e8f
 Create Date: 2025-01-27 10:00:00.000000
 
 """
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '3a4b5c6d7e8f'
-down_revision = '2ddb63f4447f'
+revision = '7f8e9d0c1b2a'
+down_revision = '3a4b5c6d7e8f'
 branch_labels = None
 depends_on = None
 
