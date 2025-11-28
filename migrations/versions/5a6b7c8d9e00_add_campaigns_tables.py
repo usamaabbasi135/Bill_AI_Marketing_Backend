@@ -1,7 +1,7 @@
 """add campaigns tables
 
 Revision ID: 5a6b7c8d9e00
-Revises: 3a4b5c6d7e8f
+Revises: 7f8e9d0c1b2a
 Create Date: 2025-01-15 15:00:00.000000
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '5a6b7c8d9e00'
-down_revision = '3a4b5c6d7e8f'
+down_revision = '7f8e9d0c1b2a'
 branch_labels = None
 depends_on = None
 
