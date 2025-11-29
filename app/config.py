@@ -31,6 +31,7 @@ class Config:
     APIFY_API_TOKEN = os.getenv('APIFY_API_TOKEN')
     APIFY_ACTOR_ID = 'apimaestro/linkedin-company-posts'
     
+    APIFY_PROFILE_ACTOR_ID = os.getenv('APIFY_PROFILE_ACTOR_ID', 'apify/linkedin-profile-scraper')
     # AWS SES Configuration
     AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
     AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
