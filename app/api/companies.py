@@ -354,6 +354,21 @@ def scrape_company(company_id):
     
     # Start async Celery task
     try:
+        # Test broker connection before queuing task
+        try:
+            # Try to get broker connection to verify it's working
+            broker = celery_app.broker_connection()
+            if broker is None:
+                raise ValueError("Celery broker connection is None")
+        except Exception as conn_error:
+            return jsonify({
+                "error": "Failed to start scraping job",
+                "details": f"Cannot connect to Redis broker: {str(conn_error)}. "
+                          f"Broker URL: {broker_url}. "
+                          "Please ensure: 1) Redis service is running, 2) REDIS_URL is correct, "
+                          "3) Worker service is created and running."
+            }), 500
+        
         task = scrape_company_posts.delay(company_id, max_posts)
         return jsonify({
             "message": "Scraping job started",
@@ -368,13 +383,25 @@ def scrape_company(company_id):
             return jsonify({
                 "error": "Failed to start scraping job",
                 "details": f"Redis connection error: {str(e)}. "
-                          "Please ensure REDIS_URL is properly configured in your environment variables. "
-                          f"Current broker URL: {broker_url}"
+                          "This usually means: 1) Celery worker service is not running, "
+                          "2) Redis connection failed, or 3) Broker URL is incorrect. "
+                          f"Current broker URL: {broker_url}. "
+                          "Please create a Celery worker service in Render (see CREATE_WORKER_NOW.md)"
             }), 500
         raise
     except Exception as e:
+        error_msg = str(e)
+        # Check if it's a connection-related error
+        if 'connection' in error_msg.lower() or 'redis' in error_msg.lower():
+            return jsonify({
+                "error": "Failed to start scraping job",
+                "details": f"Connection error: {error_msg}. "
+                          "Please ensure: 1) Redis service is running, "
+                          "2) Worker service exists and is running, "
+                          "3) REDIS_URL is correctly configured."
+            }), 500
         return jsonify({
             "error": "Failed to start scraping job",
-            "details": str(e)
+            "details": error_msg
         }), 500
 
