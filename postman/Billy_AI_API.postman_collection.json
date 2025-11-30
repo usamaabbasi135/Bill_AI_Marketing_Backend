@@ -1047,6 +1047,60 @@
       "name": "Posts",
       "item": [
         {
+          "name": "List Posts",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts?page=1&limit=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "posts"],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Items per page (default: 20, max: 100)"
+                },
+                {
+                  "key": "company_id",
+                  "value": "{{company_id}}",
+                  "description": "Filter by company ID (optional)",
+                  "disabled": true
+                },
+                {
+                  "key": "start_date",
+                  "value": "2024-01-01",
+                  "description": "Filter posts from this date (YYYY-MM-DD, optional)",
+                  "disabled": true
+                },
+                {
+                  "key": "end_date",
+                  "value": "2024-12-31",
+                  "description": "Filter posts until this date (YYYY-MM-DD, optional)",
+                  "disabled": true
+                },
+                {
+                  "key": "ai_judgement",
+                  "value": "product_launch",
+                  "description": "Filter by AI judgement (e.g., 'product_launch', 'other', optional)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "List scraped LinkedIn posts with filtering, pagination, and sorting. Returns posts sorted by date (newest first). Includes company name from JOIN with companies table. Multi-tenant: only returns posts from user's tenant."
+          }
+        },
+        {
           "name": "Analyze Single Post",
           "event": [
             {
