@@ -336,6 +336,21 @@ def scrape_company(company_id):
     
     # Import task here to avoid circular imports
     from app.tasks.scraper import scrape_company_posts
+    from app.tasks.celery_app import celery_app
+    import os
+    
+    # Validate Celery broker is configured before attempting to queue task
+    broker_url = celery_app.conf.broker_url
+    if not broker_url or broker_url == 'memory://' or 'localhost' in broker_url:
+        # Check if we're in production (Render sets certain env vars)
+        is_production = os.getenv('FLASK_ENV') == 'production' or os.getenv('RENDER')
+        if is_production:
+            return jsonify({
+                "error": "Failed to start scraping job",
+                "details": f"Celery broker not properly configured. Broker URL: {broker_url}. "
+                          "Please ensure REDIS_URL, CELERY_BROKER_URL, or CELERY_RESULT_BACKEND "
+                          "is set in your environment variables."
+            }), 500
     
     # Start async Celery task
     try:
@@ -347,6 +362,16 @@ def scrape_company(company_id):
             "max_posts": max_posts,
             "status_url": f"/api/jobs/{task.id}"  # Future endpoint for job status
         }), 202
+    except AttributeError as e:
+        # Handle 'NoneType' object has no attribute 'Redis' error
+        if 'Redis' in str(e) or 'NoneType' in str(e):
+            return jsonify({
+                "error": "Failed to start scraping job",
+                "details": f"Redis connection error: {str(e)}. "
+                          "Please ensure REDIS_URL is properly configured in your environment variables. "
+                          f"Current broker URL: {broker_url}"
+            }), 500
+        raise
     except Exception as e:
         return jsonify({
             "error": "Failed to start scraping job",
