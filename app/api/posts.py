@@ -6,7 +6,10 @@ from flask_jwt_extended import jwt_required, get_jwt
 from marshmallow import Schema, fields, validates, ValidationError
 from app.extensions import db
 from app.models.post import Post
+from app.models.company import Company
 from app.tasks.ai_analyzer import analyze_post
+from datetime import datetime
+from sqlalchemy import and_, or_
 
 bp = Blueprint('posts', __name__)
 
@@ -25,6 +28,133 @@ class BatchAnalyzeSchema(Schema):
 
 
 batch_analyze_schema = BatchAnalyzeSchema()
+
+
+@bp.route('', methods=['GET'])
+@jwt_required()
+def list_posts():
+    """
+    List scraped LinkedIn posts with filtering, pagination, and sorting.
+    
+    Query Parameters:
+        - company_id (str, optional): Filter by company ID
+        - start_date (str, optional): Filter posts from this date (YYYY-MM-DD)
+        - end_date (str, optional): Filter posts until this date (YYYY-MM-DD)
+        - ai_judgement (str, optional): Filter by AI judgement (e.g., 'product_launch', 'other')
+        - page (int, optional): Page number (default: 1)
+        - limit (int, optional): Items per page (default: 20, max: 100)
+    
+    Returns:
+        200 OK with posts array containing:
+        - post_id: Post unique identifier
+        - company_id: Company ID
+        - company_name: Company name (from JOIN)
+        - post_text: Post content
+        - post_date: Post date (YYYY-MM-DD)
+        - score: AI score (0-100)
+        - ai_judgement: AI judgement category
+        - source_url: Original LinkedIn post URL
+        - created_at: When post was scraped
+        - analyzed_at: When post was analyzed (if analyzed)
+    
+    Example:
+        GET /api/posts?company_id=xxx&page=1&limit=20&ai_judgement=product_launch
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    # Get query parameters
+    company_id = request.args.get('company_id')
+    start_date = request.args.get('start_date')
+    end_date = request.args.get('end_date')
+    ai_judgement = request.args.get('ai_judgement')
+    
+    # Pagination parameters
+    try:
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+    except ValueError:
+        return jsonify({"error": "page and limit must be integers"}), 400
+    
+    # Validate pagination
+    if page < 1:
+        page = 1
+    if limit < 1:
+        limit = 20
+    if limit > 100:
+        limit = 100
+    
+    # Build query with JOIN to companies table
+    query = db.session.query(Post, Company.name.label('company_name')).join(
+        Company, Post.company_id == Company.company_id
+    ).filter(
+        Post.tenant_id == tenant_id,
+        Company.tenant_id == tenant_id  # Ensure company belongs to tenant
+    )
+    
+    # Apply filters
+    if company_id:
+        query = query.filter(Post.company_id == company_id)
+    
+    if start_date:
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
+            query = query.filter(Post.post_date >= start_dt)
+        except ValueError:
+            return jsonify({"error": "start_date must be in YYYY-MM-DD format"}), 400
+    
+    if end_date:
+        try:
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
+            query = query.filter(Post.post_date <= end_dt)
+        except ValueError:
+            return jsonify({"error": "end_date must be in YYYY-MM-DD format"}), 400
+    
+    if ai_judgement:
+        query = query.filter(Post.ai_judgement == ai_judgement)
+    
+    # Sort by date (newest first)
+    query = query.order_by(Post.post_date.desc().nullslast(), Post.created_at.desc())
+    
+    # Get total count before pagination
+    total_count = query.count()
+    
+    # Apply pagination
+    offset = (page - 1) * limit
+    results = query.offset(offset).limit(limit).all()
+    
+    # Format response
+    posts = []
+    for post, company_name in results:
+        posts.append({
+            "post_id": post.post_id,
+            "company_id": post.company_id,
+            "company_name": company_name,
+            "post_text": post.post_text,
+            "post_date": post.post_date.isoformat() if post.post_date else None,
+            "score": post.score,
+            "ai_judgement": post.ai_judgement,
+            "source_url": post.source_url,
+            "created_at": post.created_at.isoformat() if post.created_at else None,
+            "analyzed_at": post.analyzed_at.isoformat() if post.analyzed_at else None
+        })
+    
+    # Calculate pagination metadata
+    total_pages = (total_count + limit - 1) // limit if total_count > 0 else 0
+    
+    return jsonify({
+        "posts": posts,
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total_count": total_count,
+            "total_pages": total_pages,
+            "has_next": page < total_pages,
+            "has_prev": page > 1
+        }
+    }), 200
 
 
 @bp.route('/<post_id>/analyze', methods=['POST'])

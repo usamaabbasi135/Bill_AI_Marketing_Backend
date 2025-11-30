@@ -668,8 +668,63 @@ curl -X POST http://localhost:5000/api/posts/analyze-batch \
 ---
 
 ### List Posts
+List scraped LinkedIn posts with filtering, pagination, and sorting. Returns posts sorted by date (newest first) with company information.
+
 **Endpoint:** `GET /api/posts`
-**Auth Required:** Yes
+
+**Auth Required:** Yes (Bearer access token)
+
+**Query Parameters:**
+- `page` (int, optional): Page number (default: 1, min: 1)
+- `limit` (int, optional): Items per page (default: 20, min: 1, max: 100)
+- `company_id` (string, optional): Filter by company ID (UUID)
+- `start_date` (string, optional): Filter posts from this date (format: YYYY-MM-DD)
+- `end_date` (string, optional): Filter posts until this date (format: YYYY-MM-DD)
+- `ai_judgement` (string, optional): Filter by AI judgement category (e.g., "product_launch", "other")
+
+**Success Response (200 OK):**
+```json
+{
+  "posts": [
+    {
+      "post_id": "uuid-123",
+      "company_id": "company-uuid-456",
+      "company_name": "Google",
+      "post_text": "Exciting news! We're launching our new product...",
+      "post_date": "2024-11-15",
+      "score": 85,
+      "ai_judgement": "product_launch",
+      "source_url": "https://www.linkedin.com/posts/...",
+      "created_at": "2024-11-15T10:30:00",
+      "analyzed_at": "2024-11-15T10:35:00"
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total_count": 150,
+    "total_pages": 8,
+    "has_next": true,
+    "has_prev": false
+  }
+}
+```
+
+**Example Requests:**
+```bash
+# List all posts (first page)
+curl -X GET "http://localhost:5000/api/posts?page=1&limit=20" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
+
+# Filter by company and AI judgement
+curl -X GET "http://localhost:5000/api/posts?company_id=<COMPANY_ID>&ai_judgement=product_launch" \
+  -H "Authorization: Bearer <ACCESS_TOKEN>"
+```
+
+**Notes:**
+- Posts are sorted by `post_date` (newest first)
+- Only returns posts from the authenticated user's tenant (multi-tenant isolation)
+- Includes company name via JOIN with companies table
 
 ---
 
@@ -774,6 +829,8 @@ See: [Database Documentation](DATABASE.md)
 - Celery integration for async AI analysis
 - Claude AI integration for product launch detection
 
+### Completed
+- GET /api/posts - List posts with filtering, pagination, and sorting ✅
+
 ### Coming Soon
-- GET /api/posts - List posts with filtering
 - Email generation endpoints
