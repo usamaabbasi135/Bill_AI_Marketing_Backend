@@ -49,6 +49,11 @@
       "key": "post_id",
       "value": "",
       "type": "string"
+    },
+    {
+      "key": "email_id",
+      "value": "",
+      "type": "string"
     }
   ],
   "item": [
@@ -979,6 +984,122 @@
           }
         },
         {
+          "name": "Add Profiles to Campaign",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"profile_ids\": [\"{{profile_id}}\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/campaigns/{{campaign_id}}/add-profiles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "add-profiles"]
+            },
+            "description": "Add profiles to an existing campaign. Requires campaign_id and array of profile_ids. Returns updated campaign with all profiles."
+          }
+        },
+        {
+          "name": "Remove Profile from Campaign",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/campaigns/{{campaign_id}}/profiles/{{profile_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "profiles", "{{profile_id}}"]
+            },
+            "description": "Remove a profile from a campaign. Only removes the link, does not delete the profile."
+          }
+        },
+        {
+          "name": "Generate Campaign Emails",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('job_id', jsonData.job_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"template_id\": \"{{template_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/campaigns/{{campaign_id}}/generate-emails",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "generate-emails"]
+            },
+            "description": "Generate emails for all profiles in a campaign using a template. Returns job_id immediately (async task). Emails are generated using Claude AI based on post content and profile information."
+          }
+        },
+        {
+          "name": "Send Campaign Emails",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('job_id', jsonData.job_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/campaigns/{{campaign_id}}/send-emails",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "campaigns", "{{campaign_id}}", "send-emails"]
+            },
+            "description": "Send all draft emails in a campaign via AWS SES (async). Returns job_id immediately. Only emails with status='draft' are sent."
+          }
+        },
+        {
           "name": "Delete Campaign",
           "request": {
             "method": "DELETE",
@@ -1031,6 +1152,24 @@
                   "disabled": true
                 },
                 {
+                  "key": "post_id",
+                  "value": "{{post_id}}",
+                  "description": "Filter by post ID",
+                  "disabled": true
+                },
+                {
+                  "key": "profile_id",
+                  "value": "{{profile_id}}",
+                  "description": "Filter by profile ID",
+                  "disabled": true
+                },
+                {
+                  "key": "campaign_id",
+                  "value": "{{campaign_id}}",
+                  "description": "Filter by campaign ID",
+                  "disabled": true
+                },
+                {
                   "key": "search",
                   "value": "",
                   "description": "Search in subject and recipient name",
@@ -1039,6 +1178,140 @@
               ]
             },
             "description": "List all emails for your tenant with filtering, pagination, and search. Only non-deleted emails are returned."
+          }
+        },
+        {
+          "name": "Generate Single Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('email_id', jsonData.email.email_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"post_id\": \"{{post_id}}\",\n  \"profile_id\": \"{{profile_id}}\",\n  \"template_id\": \"{{template_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/emails/generate",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "emails", "generate"]
+            },
+            "description": "Generate a single personalized email using Claude AI. Requires post_id, profile_id, and template_id. Email is generated based on post content and profile information, then saved with status='draft'."
+          }
+        },
+        {
+          "name": "Get Email by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/emails/{{email_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "emails", "{{email_id}}"]
+            },
+            "description": "Get single email details with related data (post, profile, company). Returns full email information including subject, body, status, and metadata."
+          }
+        },
+        {
+          "name": "Update Email",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"subject\": \"Updated Subject\",\n  \"body\": \"Updated email body\",\n  \"status\": \"draft\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/emails/{{email_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "emails", "{{email_id}}"]
+            },
+            "description": "Update email (subject, body, status). Cannot update if status='sent'. All fields are optional. Status must be one of: draft, sent, failed."
+          }
+        },
+        {
+          "name": "Delete Email",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/emails/{{email_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "emails", "{{email_id}}"]
+            },
+            "description": "Soft delete email (sets deleted_at timestamp). Cannot delete if status='sent'. Deleted emails are not returned in list endpoints."
+          }
+        },
+        {
+          "name": "Send Single Email",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 202) {",
+                  "    var jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('job_id', jsonData.job_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/emails/{{email_id}}/send",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "emails", "{{email_id}}", "send"]
+            },
+            "description": "Send a single email via AWS SES (async). Returns job_id immediately. Email must have status='draft' and recipient must have a valid email address. Email status is updated to 'sent' after successful delivery."
           }
         }
       ]
