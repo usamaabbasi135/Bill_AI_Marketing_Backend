@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 from datetime import datetime
 
 from flask import Blueprint, request, jsonify, current_app, Response
@@ -15,19 +16,77 @@ bp = Blueprint('profiles', __name__)
 
 def _profile_to_dict(profile):
     """Convert Profile model to dictionary for API response."""
+    # Parse JSON fields if they exist
+    experiences = None
+    skills = None
+    educations = None
+    
+    if profile.experiences:
+        try:
+            experiences = json.loads(profile.experiences)
+        except (json.JSONDecodeError, TypeError):
+            experiences = None
+    
+    if profile.skills:
+        try:
+            skills = json.loads(profile.skills)
+        except (json.JSONDecodeError, TypeError):
+            skills = None
+    
+    if profile.educations:
+        try:
+            educations = json.loads(profile.educations)
+        except (json.JSONDecodeError, TypeError):
+            educations = None
+    
     return {
         "profile_id": profile.profile_id,
         "tenant_id": profile.tenant_id,
         "person_name": profile.person_name,
+        "first_name": profile.first_name,
+        "last_name": profile.last_name,
+        "full_name": profile.full_name,
         "headline": profile.headline,
+        "about": profile.about,
         "linkedin_url": profile.linkedin_url,
+        "linkedin_public_url": profile.linkedin_public_url,
+        "linkedin_id": profile.linkedin_id,
+        "public_identifier": profile.public_identifier,
+        "urn": profile.urn,
         "status": profile.status,
         "email": profile.email,
         "phone": profile.phone,
+        "mobile_number": profile.mobile_number,
         "company": profile.company,
+        "company_name": profile.company_name,
+        "company_industry": profile.company_industry,
+        "company_website": profile.company_website,
+        "company_linkedin": profile.company_linkedin,
+        "company_founded_in": profile.company_founded_in,
+        "company_size": profile.company_size,
         "job_title": profile.job_title,
+        "job_started_on": profile.job_started_on,
+        "job_location": profile.job_location,
+        "job_still_working": profile.job_still_working,
         "location": profile.location,
+        "address_country_only": profile.address_country_only,
+        "address_with_country": profile.address_with_country,
+        "address_without_country": profile.address_without_country,
         "industry": profile.industry,
+        "connections": profile.connections,
+        "followers": profile.followers,
+        "profile_pic": profile.profile_pic,
+        "profile_pic_high_quality": profile.profile_pic_high_quality,
+        "background_pic": profile.background_pic,
+        "is_premium": profile.is_premium,
+        "is_verified": profile.is_verified,
+        "is_job_seeker": profile.is_job_seeker,
+        "is_retired": profile.is_retired,
+        "is_creator": profile.is_creator,
+        "is_influencer": profile.is_influencer,
+        "experiences": experiences,
+        "skills": skills,
+        "educations": educations,
         "scraped_at": profile.scraped_at.isoformat() if profile.scraped_at else None,
         "created_at": profile.created_at.isoformat() if profile.created_at else None
     }

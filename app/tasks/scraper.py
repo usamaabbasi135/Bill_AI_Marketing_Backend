@@ -636,7 +636,7 @@ def _call_apify_with_retry(client, linkedin_url, profile_id, logger):
 def _update_profile_from_apify_result(profile, apify_result):
     """
     Update profile fields from Apify result data.
-    Handles different Apify actor response formats, including nested structures.
+    Handles dev_fusion/linkedin-profile-scraper response format.
     """
     now = datetime.utcnow()
     
@@ -655,146 +655,102 @@ def _update_profile_from_apify_result(profile, apify_result):
             profile.scraped_at = now
             return
     
-    # Helper function to get nested values
-    def get_nested_value(data, *keys):
-        """Get value from nested dict/list using multiple keys."""
-        if not isinstance(data, (dict, list)):
-            return None
-        current = data
-        for key in keys:
-            if current is None:
-                return None
-            if isinstance(current, dict):
-                current = current.get(key)
-            elif isinstance(current, list) and isinstance(key, int) and 0 <= key < len(current):
-                current = current[key]
-            else:
-                return None
-        return current
+    # Helper function to safely get values
+    def safe_get(key, default=None):
+        """Safely get value from apify_result."""
+        value = apify_result.get(key, default)
+        return value if value is not None else default
     
-    # Different Apify actors return data in different formats
-    # Try multiple possible field names for each attribute, including nested structures
+    # Basic Information
+    profile.first_name = safe_get('firstName')
+    profile.last_name = safe_get('lastName')
+    profile.full_name = safe_get('fullName')
+    profile.person_name = safe_get('fullName') or safe_get('person_name')  # Keep for backward compatibility
+    profile.headline = safe_get('headline')
+    profile.about = safe_get('about')
     
-    # Person Name - try: name, fullName, full_name, personName, title, profile.name, data.name
-    person_name = (
-        get_nested_value(apify_result, 'name') or
-        get_nested_value(apify_result, 'fullName') or
-        get_nested_value(apify_result, 'full_name') or
-        get_nested_value(apify_result, 'personName') or
-        get_nested_value(apify_result, 'title') or
-        get_nested_value(apify_result, 'profile', 'name') or
-        get_nested_value(apify_result, 'data', 'name') or
-        apify_result.get('name') or 
-        apify_result.get('fullName') or 
-        apify_result.get('full_name') or 
-        apify_result.get('personName') or
-        apify_result.get('title') or
-        None
-    )
-    if person_name:
-        profile.person_name = str(person_name).strip() if person_name else None
+    # Contact Information
+    profile.email = safe_get('email')
+    profile.phone = safe_get('phone') or safe_get('mobileNumber')
+    profile.mobile_number = safe_get('mobileNumber')
     
-    # Email - try: email, emailAddress, email_address, contactEmail, profile.email, data.email
-    email = (
-        get_nested_value(apify_result, 'email') or
-        get_nested_value(apify_result, 'emailAddress') or
-        get_nested_value(apify_result, 'email_address') or
-        get_nested_value(apify_result, 'contactEmail') or
-        get_nested_value(apify_result, 'profile', 'email') or
-        get_nested_value(apify_result, 'data', 'email') or
-        apify_result.get('email') or 
-        apify_result.get('emailAddress') or 
-        apify_result.get('email_address') or 
-        apify_result.get('contactEmail') or
-        None
-    )
-    if email:
-        profile.email = str(email).strip() if email else None
+    # LinkedIn Identifiers
+    profile.linkedin_id = safe_get('linkedinId')
+    profile.public_identifier = safe_get('publicIdentifier')
+    profile.linkedin_public_url = safe_get('linkedinPublicUrl') or safe_get('linkedinUrl')
+    profile.urn = safe_get('urn')
     
-    # Phone - try: phone, phoneNumber, phone_number, contactPhone
-    phone = (
-        apify_result.get('phone') or 
-        apify_result.get('phoneNumber') or 
-        apify_result.get('phone_number') or 
-        apify_result.get('contactPhone') or
-        None
-    )
-    if phone:
-        profile.phone = phone
+    # Social Stats
+    profile.connections = safe_get('connections')
+    profile.followers = safe_get('followers')
     
-    # Company - try: company, companyName, company_name, currentCompany, organization, experience.company
-    company = (
-        get_nested_value(apify_result, 'company') or
-        get_nested_value(apify_result, 'companyName') or
-        get_nested_value(apify_result, 'company_name') or
-        get_nested_value(apify_result, 'currentCompany') or
-        get_nested_value(apify_result, 'organization') or
-        get_nested_value(apify_result, 'experience', 0, 'company') if isinstance(apify_result.get('experience'), list) and len(apify_result.get('experience', [])) > 0 else None or
-        apify_result.get('company') or 
-        apify_result.get('companyName') or 
-        apify_result.get('company_name') or 
-        apify_result.get('currentCompany') or
-        apify_result.get('organization') or
-        None
-    )
-    if company:
-        profile.company = str(company).strip() if company else None
+    # Current Job Information
+    profile.job_title = safe_get('jobTitle')
+    profile.job_started_on = safe_get('jobStartedOn')
+    profile.job_location = safe_get('jobLocation')
+    profile.job_still_working = safe_get('jobStillWorking')
     
-    # Job Title - try: jobTitle, job_title, position, title, currentPosition, experience.position
-    job_title = (
-        get_nested_value(apify_result, 'jobTitle') or
-        get_nested_value(apify_result, 'job_title') or
-        get_nested_value(apify_result, 'position') or
-        get_nested_value(apify_result, 'currentPosition') or
-        get_nested_value(apify_result, 'experience', 0, 'position') if isinstance(apify_result.get('experience'), list) and len(apify_result.get('experience', [])) > 0 else None or
-        apify_result.get('jobTitle') or 
-        apify_result.get('job_title') or 
-        apify_result.get('position') or 
-        apify_result.get('currentPosition') or
-        None
-    )
-    if job_title:
-        profile.job_title = str(job_title).strip() if job_title else None
+    # Company Information
+    profile.company = safe_get('companyName') or safe_get('company')  # Keep for backward compatibility
+    profile.company_name = safe_get('companyName')
+    profile.company_industry = safe_get('companyIndustry')
+    profile.company_website = safe_get('companyWebsite')
+    profile.company_linkedin = safe_get('companyLinkedin')
+    profile.company_founded_in = safe_get('companyFoundedIn')
+    profile.company_size = safe_get('companySize')
     
-    # Headline - try: headline, summary, bio, description
-    headline = (
-        apify_result.get('headline') or 
-        apify_result.get('summary') or 
-        apify_result.get('bio') or 
-        apify_result.get('description') or
-        None
-    )
-    if headline:
-        profile.headline = headline
+    # Location Information
+    profile.location = safe_get('addressWithCountry') or safe_get('addressWithoutCountry') or safe_get('location')  # Keep for backward compatibility
+    profile.address_country_only = safe_get('addressCountryOnly')
+    profile.address_with_country = safe_get('addressWithCountry')
+    profile.address_without_country = safe_get('addressWithoutCountry')
     
-    # Location - try: location, city, address, locationName
-    location = (
-        apify_result.get('location') or 
-        apify_result.get('city') or 
-        apify_result.get('address') or 
-        apify_result.get('locationName') or
-        None
-    )
-    if location:
-        profile.location = location
+    # Profile Media
+    profile.profile_pic = safe_get('profilePic')
+    profile.profile_pic_high_quality = safe_get('profilePicHighQuality')
+    profile.background_pic = safe_get('backgroundPic')
     
-    # Industry - try: industry, sector, industryType
-    industry = (
-        apify_result.get('industry') or 
-        apify_result.get('sector') or 
-        apify_result.get('industryType') or
-        None
-    )
-    if industry:
-        profile.industry = industry
+    # Profile Flags
+    profile.is_premium = safe_get('isPremium')
+    profile.is_verified = safe_get('isVerified')
+    profile.is_job_seeker = safe_get('isJobSeeker')
+    profile.is_retired = safe_get('isRetired')
+    profile.is_creator = safe_get('isCreator')
+    profile.is_influencer = safe_get('isInfluencer')
     
-    # Always update status and timestamp on success (even if no data was extracted)
+    # Industry (keep for backward compatibility)
+    profile.industry = safe_get('companyIndustry') or safe_get('industry')
+    
+    # Complex Data Structures (store as JSON)
+    if safe_get('experiences'):
+        try:
+            profile.experiences = json.dumps(apify_result.get('experiences'))
+        except Exception as e:
+            logger.warning(f"Error serializing experiences: {e}")
+    
+    if safe_get('skills'):
+        try:
+            profile.skills = json.dumps(apify_result.get('skills'))
+        except Exception as e:
+            logger.warning(f"Error serializing skills: {e}")
+    
+    if safe_get('educations'):
+        try:
+            profile.educations = json.dumps(apify_result.get('educations'))
+        except Exception as e:
+            logger.warning(f"Error serializing educations: {e}")
+    
+    # Always update status and timestamp on success
     profile.status = 'scraped'
     profile.scraped_at = now
     
     # Log if no data was extracted (for debugging)
-    if not any([person_name, email, phone, company, job_title, headline, location, industry]):
-        logger.warning(f"Profile {profile.profile_id} marked as scraped but no data fields were populated. Apify result keys: {list(apify_result.keys()) if isinstance(apify_result, dict) else type(apify_result)}")
+    extracted_fields = [
+        profile.first_name, profile.last_name, profile.full_name, profile.email, 
+        profile.phone, profile.company_name, profile.job_title, profile.headline
+    ]
+    if not any(extracted_fields):
+        logger.warning(f"Profile {profile.profile_id} marked as scraped but no key data fields were populated. Apify result keys: {list(apify_result.keys()) if isinstance(apify_result, dict) else type(apify_result)}")
 
 
 def _categorize_error(error):
