@@ -162,15 +162,81 @@ Analyze and return JSON only:"""
                 }
                 
             except Exception as api_error:
-                logger.error(f"Claude API error for post {post_id}: {str(api_error)}")
+                error_str = str(api_error)
+                error_msg_lower = error_str.lower()
+                logger.error(f"Claude API error for post {post_id}: {error_str}")
                 
-                # Handle rate limits with exponential backoff
-                if "rate limit" in str(api_error).lower() or "429" in str(api_error):
+                # Check for non-retryable errors (fail immediately)
+                # 404 = model not found, invalid model name
+                # 400 = bad request, invalid parameters
+                # 401 = unauthorized, invalid API key
+                # 403 = forbidden
+                non_retryable_errors = [
+                    "404", "not_found", "model not found", "invalid model",
+                    "400", "bad request", "invalid",
+                    "401", "unauthorized", "invalid api key",
+                    "403", "forbidden"
+                ]
+                
+                is_non_retryable = any(err in error_msg_lower for err in non_retryable_errors)
+                
+                if is_non_retryable:
+                    # Fail immediately - don't retry
+                    logger.error(f"Non-retryable error for post {post_id}: {error_str}")
+                    job.status = 'failed'
+                    job.error_message = f"API error (non-retryable): {error_str}"
+                    job.completed_at = datetime.utcnow()
+                    job.completed_items = 1
+                    job.failed_count = 1
+                    job.updated_at = datetime.utcnow()
+                    
+                    # Update post with default values
+                    post.score = 0
+                    post.ai_judgement = 'other'
+                    post.analyzed_at = datetime.utcnow()
+                    
+                    db.session.commit()
+                    
+                    return {
+                        "status": "error",
+                        "error": "Analysis failed - non-retryable error",
+                        "post_id": post_id,
+                        "details": error_str
+                    }
+                
+                # Handle rate limits with exponential backoff (retryable)
+                if "rate limit" in error_msg_lower or "429" in error_str:
                     logger.warning(f"Rate limit hit for post {post_id}, retrying...")
                     raise self.retry(exc=api_error, countdown=60 * (2 ** self.request.retries))
                 
-                # For other API errors, retry with backoff
-                raise self.retry(exc=api_error, countdown=30 * (2 ** self.request.retries))
+                # For other transient errors (5xx, timeouts), retry with backoff
+                # Only retry if we haven't exceeded max retries
+                if self.request.retries < self.max_retries:
+                    logger.warning(f"Transient error for post {post_id}, retrying... (attempt {self.request.retries + 1}/{self.max_retries})")
+                    raise self.retry(exc=api_error, countdown=30 * (2 ** self.request.retries))
+                else:
+                    # Max retries reached, fail the job
+                    logger.error(f"Max retries reached for post {post_id}")
+                    job.status = 'failed'
+                    job.error_message = f"Analysis failed after {self.max_retries} retries: {error_str}"
+                    job.completed_at = datetime.utcnow()
+                    job.completed_items = 1
+                    job.failed_count = 1
+                    job.updated_at = datetime.utcnow()
+                    
+                    # Update post with default values
+                    post.score = 0
+                    post.ai_judgement = 'other'
+                    post.analyzed_at = datetime.utcnow()
+                    
+                    db.session.commit()
+                    
+                    return {
+                        "status": "error",
+                        "error": "Analysis failed after retries",
+                        "post_id": post_id,
+                        "details": error_str
+                    }
             
         except Exception as e:
             logger.error(f"Error analyzing post {post_id}: {str(e)}")
