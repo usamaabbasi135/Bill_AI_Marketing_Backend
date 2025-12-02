@@ -1,5 +1,6 @@
 import csv
 import io
+from datetime import datetime
 
 from flask import Blueprint, request, jsonify, current_app, Response
 from flask_jwt_extended import jwt_required, get_jwt
@@ -472,10 +473,46 @@ def scrape_all_profiles():
         
         current_app.logger.debug(f"Profile scrape: Created job_id={job_id} for tenant_id={tenant_id}")
         
-        # Start async Celery task
-        task = scrape_profiles.delay(job_id, tenant_id, profile_ids=None)
+        # Check if Celery is properly configured before starting task
+        try:
+            from app.tasks.celery_app import celery_app
+            # Check if broker is configured
+            broker_url = celery_app.conf.broker_url
+            if not broker_url or broker_url == 'memory://':
+                raise ValueError("Celery broker is not properly configured. Please check Redis connection.")
+        except Exception as celery_check_error:
+            current_app.logger.error(f"Profile scrape: Celery configuration error: {str(celery_check_error)}")
+            job.status = 'failed'
+            job.error_message = f"Celery/Redis not configured: {str(celery_check_error)}"
+            job.completed_at = datetime.utcnow()
+            db.session.commit()
+            return jsonify({
+                "error": "Celery/Redis service not available",
+                "details": str(celery_check_error),
+                "message": "Please ensure Redis is running and CELERY_BROKER_URL is configured"
+            }), 503
         
-        current_app.logger.info(f"Profile scrape: Started job_id={job_id}, task_id={task.id}, tenant_id={tenant_id}")
+        # Start async Celery task
+        try:
+            task = scrape_profiles.delay(job_id, tenant_id, profile_ids=None)
+            current_app.logger.info(f"Profile scrape: Started job_id={job_id}, task_id={task.id}, tenant_id={tenant_id}")
+        except Exception as celery_error:
+            # Handle Celery connection errors specifically
+            error_msg = str(celery_error)
+            if 'Redis' in error_msg or 'broker' in error_msg.lower() or 'connection' in error_msg.lower():
+                current_app.logger.error(f"Profile scrape: Celery/Redis connection error: {error_msg}")
+                job.status = 'failed'
+                job.error_message = f"Celery/Redis connection failed: {error_msg}"
+                job.completed_at = datetime.utcnow()
+                db.session.commit()
+                return jsonify({
+                    "error": "Celery/Redis connection failed",
+                    "details": error_msg,
+                    "message": "Please ensure Redis is running and accessible"
+                }), 503
+            else:
+                # Re-raise other errors to be caught by outer exception handler
+                raise
         
         return jsonify({
             "message": "Scraping job started",
@@ -548,10 +585,46 @@ def scrape_single_profile(profile_id):
         
         current_app.logger.debug(f"Profile scrape: Created job_id={job_id} for profile_id={profile_id}")
         
-        # Start async Celery task
-        task = scrape_profiles.delay(job_id, tenant_id, profile_ids=[profile_id])
+        # Check if Celery is properly configured before starting task
+        try:
+            from app.tasks.celery_app import celery_app
+            # Check if broker is configured
+            broker_url = celery_app.conf.broker_url
+            if not broker_url or broker_url == 'memory://':
+                raise ValueError("Celery broker is not properly configured. Please check Redis connection.")
+        except Exception as celery_check_error:
+            current_app.logger.error(f"Profile scrape: Celery configuration error: {str(celery_check_error)}")
+            job.status = 'failed'
+            job.error_message = f"Celery/Redis not configured: {str(celery_check_error)}"
+            job.completed_at = datetime.utcnow()
+            db.session.commit()
+            return jsonify({
+                "error": "Celery/Redis service not available",
+                "details": str(celery_check_error),
+                "message": "Please ensure Redis is running and CELERY_BROKER_URL is configured"
+            }), 503
         
-        current_app.logger.info(f"Profile scrape: Started job_id={job_id}, task_id={task.id}, profile_id={profile_id}")
+        # Start async Celery task
+        try:
+            task = scrape_profiles.delay(job_id, tenant_id, profile_ids=[profile_id])
+            current_app.logger.info(f"Profile scrape: Started job_id={job_id}, task_id={task.id}, profile_id={profile_id}")
+        except Exception as celery_error:
+            # Handle Celery connection errors specifically
+            error_msg = str(celery_error)
+            if 'Redis' in error_msg or 'broker' in error_msg.lower() or 'connection' in error_msg.lower():
+                current_app.logger.error(f"Profile scrape: Celery/Redis connection error: {error_msg}")
+                job.status = 'failed'
+                job.error_message = f"Celery/Redis connection failed: {error_msg}"
+                job.completed_at = datetime.utcnow()
+                db.session.commit()
+                return jsonify({
+                    "error": "Celery/Redis connection failed",
+                    "details": error_msg,
+                    "message": "Please ensure Redis is running and accessible"
+                }), 503
+            else:
+                # Re-raise other errors to be caught by outer exception handler
+                raise
         
         return jsonify({
             "message": "Scraping job started",
