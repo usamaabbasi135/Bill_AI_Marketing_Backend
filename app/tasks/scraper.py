@@ -326,7 +326,7 @@ def scrape_profiles(self, job_id, tenant_id, profile_ids=None):
             if not actor_id or not isinstance(actor_id, str) or actor_id.strip() == '':
                 logger.error("APIFY_PROFILE_ACTOR_ID is not configured or is empty")
                 job.status = 'failed'
-                job.error_message = "Apify profile actor ID not configured"
+                job.error_message = "Apify profile actor ID not configured. Please set APIFY_PROFILE_ACTOR_ID environment variable."
                 job.completed_at = datetime.utcnow()
                 job.updated_at = datetime.utcnow()
                 db.session.commit()
@@ -337,7 +337,18 @@ def scrape_profiles(self, job_id, tenant_id, profile_ids=None):
                 logger.error(f"APIFY_PROFILE_ACTOR_ID appears to be a URL, not an actor ID: {actor_id}")
                 logger.error("Actor ID should be in format: 'username/actor-name' (e.g., 'apify/linkedin-profile-scraper')")
                 job.status = 'failed'
-                job.error_message = f"Invalid actor ID format (looks like a URL): {actor_id}"
+                job.error_message = f"Invalid actor ID format (looks like a URL): {actor_id}. Should be 'username/actor-name'"
+                job.completed_at = datetime.utcnow()
+                job.updated_at = datetime.utcnow()
+                db.session.commit()
+                return {"status": "error", "message": f"Invalid actor ID format: {actor_id}"}
+            
+            # Validate actor ID format
+            if '/' not in actor_id or actor_id.count('/') != 1:
+                logger.error(f"APIFY_PROFILE_ACTOR_ID has invalid format: {actor_id}")
+                logger.error("Actor ID should be in format: 'username/actor-name'")
+                job.status = 'failed'
+                job.error_message = f"Invalid actor ID format: {actor_id}. Should be 'username/actor-name'"
                 job.completed_at = datetime.utcnow()
                 job.updated_at = datetime.utcnow()
                 db.session.commit()
@@ -372,6 +383,27 @@ def scrape_profiles(self, job_id, tenant_id, profile_ids=None):
                     
                     logger.debug(f"Successfully scraped profile {profile.profile_id}: {profile.person_name}")
                     
+                except ValueError as e:
+                    # Handle actor not found errors specifically
+                    error_msg = str(e)
+                    if "Actor" in error_msg and "not found" in error_msg:
+                        error_type = 'actor_not_found'
+                        logger.error(
+                            f"Error scraping profile {profile.profile_id} ({error_type}): {error_msg}", 
+                            exc_info=True
+                        )
+                        profile.status = 'scraping_failed'
+                        profiles_to_commit.append(profile)
+                        failed_count += 1
+                        failed_profiles.append({
+                            "profile_id": profile.profile_id,
+                            "linkedin_url": profile.linkedin_url,
+                            "error": error_msg,
+                            "error_type": error_type
+                        })
+                    else:
+                        # Re-raise other ValueError exceptions
+                        raise
                 except Exception as e:
                     error_type = _categorize_error(e)
                     logger.error(
@@ -447,7 +479,12 @@ def scrape_profiles(self, job_id, tenant_id, profile_ids=None):
             logger.error(f"Error in profile scraping task: {str(e)}", exc_info=True)
             if job:
                 job.status = 'failed'
-                job.error_message = str(e)
+                error_msg = str(e)
+                # Provide helpful message for actor not found errors
+                if 'actor' in error_msg.lower() and 'not found' in error_msg.lower():
+                    actor_id = Config.APIFY_PROFILE_ACTOR_ID
+                    error_msg = f"Apify Actor '{actor_id}' not found. Please set a valid APIFY_PROFILE_ACTOR_ID environment variable. Common options: apify/linkedin-profile-scraper, apify/linkedin-scraper, apify/unlimited-leads-linkedin"
+                job.error_message = error_msg
                 job.completed_at = datetime.utcnow()
                 job.updated_at = datetime.utcnow()
                 db.session.commit()
@@ -547,10 +584,21 @@ def _call_apify_with_retry(client, linkedin_url, profile_id, logger):
             # Apify-specific errors (e.g., actor not found)
             last_exception = e
             error_msg = str(e)
-            if "actor" in error_msg.lower() or "not found" in error_msg.lower():
+            error_lower = error_msg.lower()
+            
+            # Check for actor not found errors - don't retry these
+            if "actor" in error_lower and ("not found" in error_lower or "was not found" in error_lower):
                 logger.error(f"Apify Actor '{actor_id}' not found or unavailable. Error: {error_msg}")
                 logger.error(f"Please check the actor ID in your configuration. Current: {actor_id}")
-                logger.error("Common alternatives: apify/linkedin-profile-scraper, apify/linkedin-scraper")
+                logger.error("Common alternatives:")
+                logger.error("  - apify/linkedin-profile-scraper")
+                logger.error("  - apify/linkedin-scraper")
+                logger.error("  - apify/unlimited-leads-linkedin")
+                logger.error("  - apify/linkedin-profile-enrichment")
+                # Don't retry - actor doesn't exist, retrying won't help
+                raise ValueError(f"Apify Actor '{actor_id}' not found. Please set a valid APIFY_PROFILE_ACTOR_ID in your environment variables. Error: {error_msg}")
+            
+            # For other Apify errors, retry if appropriate
             if attempt < MAX_RETRIES - 1:
                 logger.warning(f"Apify API error (attempt {attempt + 1}): {error_msg}, will retry...")
             else:
@@ -605,10 +653,14 @@ def _categorize_error(error):
     Categorize errors for better tracking and handling.
     
     Returns:
-        str: Error category (network, rate_limit, api_error, not_found, other)
+        str: Error category (network, rate_limit, api_error, actor_not_found, not_found, other)
     """
     error_str = str(error).lower()
     error_type = type(error).__name__
+    
+    # Check for actor not found errors first
+    if 'actor' in error_str and ('not found' in error_str or 'was not found' in error_str):
+        return 'actor_not_found'
     
     if isinstance(error, (Timeout, ConnectionError)):
         return 'network'
@@ -621,6 +673,9 @@ def _categorize_error(error):
                 return 'not_found'
         return 'api_error'
     elif isinstance(error, ApifyApiError):
+        # Check error message for actor not found
+        if 'actor' in error_str and 'not found' in error_str:
+            return 'actor_not_found'
         return 'api_error'
     elif 'not found' in error_str or '404' in error_str:
         return 'not_found'
