@@ -10,11 +10,14 @@ from app.extensions import db
 from app.models.post import Post
 from app.models.job import Job
 from app import create_app
+from app.config import Config
 
 logger = logging.getLogger(__name__)
 
 # Initialize Anthropic client
 anthropic_client = None
+# Cache for working model (to avoid trying all models on every call)
+_working_model = None
 
 
 def get_anthropic_client():
@@ -26,6 +29,62 @@ def get_anthropic_client():
             raise ValueError("CLAUDE_API_KEY not configured")
         anthropic_client = Anthropic(api_key=api_key)
     return anthropic_client
+
+
+def get_working_claude_model(client, failed_model=None):
+    """
+    Get a working Claude model, trying multiple models if needed.
+    Caches the working model to avoid repeated API calls.
+    
+    Args:
+        client: Anthropic client instance
+        failed_model: If provided, this model failed and we should try the next one
+    
+    Returns:
+        str: The first working model name
+    """
+    global _working_model
+    
+    # If a model failed, clear cache and find a new one
+    if failed_model:
+        _working_model = None
+        # Find the index of the failed model and start from the next one
+        try:
+            failed_index = Config.CLAUDE_MODELS.index(failed_model)
+            models_to_try = Config.CLAUDE_MODELS[failed_index + 1:]
+        except ValueError:
+            models_to_try = Config.CLAUDE_MODELS
+    else:
+        # Return cached model if available
+        if _working_model:
+            return _working_model
+        models_to_try = Config.CLAUDE_MODELS
+    
+    # Try each model in order
+    for model_name in models_to_try:
+        try:
+            # Test the model with a minimal request
+            test_response = client.messages.create(
+                model=model_name,
+                max_tokens=10,
+                messages=[{"role": "user", "content": "test"}]
+            )
+            # If successful, cache and return this model
+            _working_model = model_name
+            logger.info(f"Using Claude model: {model_name}")
+            return model_name
+        except Exception as e:
+            error_str = str(e).lower()
+            # If it's a 404 (model not found), try next model
+            if "404" in error_str or "not_found" in error_str or "model not found" in error_str:
+                logger.warning(f"Model {model_name} not available, trying next...")
+                continue
+            # For other errors (auth, etc.), don't try other models
+            logger.error(f"Error testing model {model_name}: {e}")
+            raise
+    
+    # If all models failed, raise error
+    raise ValueError(f"None of the configured Claude models are available: {Config.CLAUDE_MODELS}")
 
 
 @celery_app.task(bind=True, max_retries=3)
@@ -96,10 +155,13 @@ Analyze and return JSON only:"""
             # Call Claude API
             client = get_anthropic_client()
             
+            # Get working model (uses cache if available)
+            working_model = get_working_claude_model(client)
+            
             try:
                 message = client.messages.create(
-                    model="claude-3-5-sonnet-20241022",
-                    max_tokens=1024,
+                    model=working_model,
+                    max_tokens=Config.CLAUDE_MAX_TOKENS,
                     messages=[
                         {"role": "user", "content": prompt}
                     ]
@@ -179,6 +241,90 @@ Analyze and return JSON only:"""
                 ]
                 
                 is_non_retryable = any(err in error_msg_lower for err in non_retryable_errors)
+                
+                # If it's a 404 (model not found), try next model
+                if "404" in error_str or "not_found" in error_msg_lower or "model not found" in error_msg_lower:
+                    logger.warning(f"Model {working_model} not found, trying next available model...")
+                    try:
+                        # Try next model
+                        working_model = get_working_claude_model(client, failed_model=working_model)
+                        # Retry with new model (don't count as a retry)
+                        message = client.messages.create(
+                            model=working_model,
+                            max_tokens=Config.CLAUDE_MAX_TOKENS,
+                            messages=[
+                                {"role": "user", "content": prompt}
+                            ]
+                        )
+                        # If successful, continue with processing
+                        response_text = message.content[0].text.strip()
+                        # Parse JSON response
+                        import json
+                        if "```json" in response_text:
+                            response_text = response_text.split("```json")[1].split("```")[0].strip()
+                        elif "```" in response_text:
+                            response_text = response_text.split("```")[1].split("```")[0].strip()
+                        
+                        analysis = json.loads(response_text)
+                        score = int(analysis.get('score', 0))
+                        judgement = analysis.get('judgement', 'other')
+                        
+                        if judgement not in ['product_launch', 'other']:
+                            judgement = 'other'
+                        
+                        score = max(0, min(100, score))
+                        
+                        post.score = score
+                        post.ai_judgement = judgement
+                        post.analyzed_at = datetime.utcnow()
+                        
+                        job.status = 'completed'
+                        job.completed_at = datetime.utcnow()
+                        job.completed_items = 1
+                        job.success_count = 1
+                        job.updated_at = datetime.utcnow()
+                        
+                        result_data = {
+                            "post_id": post_id,
+                            "score": score,
+                            "judgement": judgement,
+                            "analyzed_at": post.analyzed_at.isoformat() if post.analyzed_at else None
+                        }
+                        job.result_data = json.dumps(result_data)
+                        
+                        db.session.commit()
+                        
+                        logger.info(f"Successfully analyzed post {post_id} with model {working_model}: score={score}, judgement={judgement}")
+                        
+                        return {
+                            "status": "success",
+                            "post_id": post_id,
+                            "score": score,
+                            "judgement": judgement,
+                            "analyzed_at": post.analyzed_at.isoformat() if post.analyzed_at else None
+                        }
+                    except Exception as fallback_error:
+                        # All models failed
+                        logger.error(f"All Claude models failed for post {post_id}: {fallback_error}")
+                        job.status = 'failed'
+                        job.error_message = f"All configured models failed: {str(fallback_error)}"
+                        job.completed_at = datetime.utcnow()
+                        job.completed_items = 1
+                        job.failed_count = 1
+                        job.updated_at = datetime.utcnow()
+                        
+                        post.score = 0
+                        post.ai_judgement = 'other'
+                        post.analyzed_at = datetime.utcnow()
+                        
+                        db.session.commit()
+                        
+                        return {
+                            "status": "error",
+                            "error": "All Claude models unavailable",
+                            "post_id": post_id,
+                            "details": str(fallback_error)
+                        }
                 
                 if is_non_retryable:
                     # Fail immediately - don't retry
