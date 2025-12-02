@@ -384,26 +384,33 @@ def scrape_profiles(self, job_id, tenant_id, profile_ids=None):
                     logger.debug(f"Successfully scraped profile {profile.profile_id}: {profile.person_name}")
                     
                 except ValueError as e:
-                    # Handle actor not found errors specifically
+                    # Handle various ValueError exceptions (actor not found, Apify errors, etc.)
                     error_msg = str(e)
-                    if "Actor" in error_msg and "not found" in error_msg:
+                    error_lower = error_msg.lower()
+                    
+                    # Determine error type
+                    if "actor" in error_lower and "not found" in error_lower:
                         error_type = 'actor_not_found'
-                        logger.error(
-                            f"Error scraping profile {profile.profile_id} ({error_type}): {error_msg}", 
-                            exc_info=True
-                        )
-                        profile.status = 'scraping_failed'
-                        profiles_to_commit.append(profile)
-                        failed_count += 1
-                        failed_profiles.append({
-                            "profile_id": profile.profile_id,
-                            "linkedin_url": profile.linkedin_url,
-                            "error": error_msg,
-                            "error_type": error_type
-                        })
+                    elif "apify" in error_lower and ("free" in error_lower or "plan" in error_lower):
+                        error_type = 'apify_plan_limitation'
+                    elif "apify" in error_lower and "error" in error_lower:
+                        error_type = 'apify_error'
                     else:
-                        # Re-raise other ValueError exceptions
-                        raise
+                        error_type = 'validation_error'
+                    
+                    logger.error(
+                        f"Error scraping profile {profile.profile_id} ({error_type}): {error_msg}", 
+                        exc_info=True
+                    )
+                    profile.status = 'scraping_failed'
+                    profiles_to_commit.append(profile)
+                    failed_count += 1
+                    failed_profiles.append({
+                        "profile_id": profile.profile_id,
+                        "linkedin_url": profile.linkedin_url,
+                        "error": error_msg,
+                        "error_type": error_type
+                    })
                 except Exception as e:
                     error_type = _categorize_error(e)
                     logger.error(
@@ -559,6 +566,24 @@ def _call_apify_with_retry(client, linkedin_url, profile_id, logger):
                     # Log a sample of the data (first 1000 chars to avoid log spam)
                     result_sample = json.dumps(apify_result, indent=2, default=str)[:1000]
                     logger.debug(f"Apify result sample: {result_sample}")
+                    
+                    # Check if the result contains an error (common with free Apify plans)
+                    if 'error' in apify_result:
+                        error_msg = apify_result.get('error', 'Unknown error from Apify')
+                        logger.error(f"Apify returned an error response: {error_msg}")
+                        # Check for free plan limitation message
+                        if 'free' in str(error_msg).lower() and 'plan' in str(error_msg).lower():
+                            raise ValueError(f"Apify free plan limitation: {error_msg}. Please upgrade your Apify plan to use this actor via API.")
+                        else:
+                            raise ValueError(f"Apify error: {error_msg}")
+                    
+                    # Check if result only has error-related keys (no actual data)
+                    result_keys = set(apify_result.keys())
+                    error_keys = {'error', 'message', 'status', 'code'}
+                    if result_keys.issubset(error_keys) or len(result_keys) == 0:
+                        error_msg = apify_result.get('error') or apify_result.get('message') or 'No data returned from Apify'
+                        logger.error(f"Apify result contains only error information: {error_msg}")
+                        raise ValueError(f"Apify returned error: {error_msg}")
                 else:
                     logger.warning(f"Apify result is not a dict, type: {type(apify_result)}")
                 
@@ -644,6 +669,24 @@ def _update_profile_from_apify_result(profile, apify_result):
     if isinstance(apify_result, dict):
         logger.info(f"Updating profile from Apify result - Keys: {list(apify_result.keys())}")
         logger.debug(f"Apify result sample: {json.dumps(apify_result, indent=2, default=str)[:1000]}")
+        
+        # Check if the result contains an error (should be caught earlier, but double-check here)
+        if 'error' in apify_result:
+            error_msg = apify_result.get('error', 'Unknown error from Apify')
+            logger.error(f"Apify result contains error, marking profile as failed: {error_msg}")
+            profile.status = 'scraping_failed'
+            profile.scraped_at = now
+            raise ValueError(f"Apify error: {error_msg}")
+        
+        # Check if result only has error-related keys (no actual data)
+        result_keys = set(apify_result.keys())
+        error_keys = {'error', 'message', 'status', 'code'}
+        if result_keys.issubset(error_keys) or len(result_keys) == 0:
+            error_msg = apify_result.get('error') or apify_result.get('message') or 'No data returned from Apify'
+            logger.error(f"Apify result contains only error information, marking profile as failed: {error_msg}")
+            profile.status = 'scraping_failed'
+            profile.scraped_at = now
+            raise ValueError(f"Apify returned error: {error_msg}")
     else:
         logger.warning(f"Apify result is not a dict, type: {type(apify_result)}")
         # If it's not a dict, try to extract data from it
@@ -651,9 +694,9 @@ def _update_profile_from_apify_result(profile, apify_result):
             apify_result = apify_result.__dict__
         else:
             logger.error(f"Cannot process Apify result of type {type(apify_result)}")
-            profile.status = 'scraped'
+            profile.status = 'scraping_failed'
             profile.scraped_at = now
-            return
+            raise ValueError(f"Cannot process Apify result of type {type(apify_result)}")
     
     # Helper function to safely get values
     def safe_get(key, default=None):
