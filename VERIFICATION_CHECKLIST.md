@@ -1,132 +1,124 @@
-# Email Template Management System - Verification Checklist
+# Profile Scraping Verification Checklist
 
-## ✅ All Requirements Implemented
+## ✅ What Has Been Fixed
 
-### 1. Database Table ✅
-- [x] `email_templates` table created
-- [x] Fields: `template_id` (PK), `tenant_id` (FK, nullable), `name`, `subject`, `body`, `is_default`, `created_at`, `updated_at`
-- [x] Foreign key to `tenants` table with `ON DELETE CASCADE`
-- [x] Migration file: `migrations/versions/3a4b5c6d7e8f_add_email_templates_table.py`
+### 1. Database Schema Issues - **RESOLVED**
+- ✅ All required columns exist in `jobs` table
+- ✅ Migration handles both legacy and new fields
+- ✅ Jobs can be created without database errors
 
-### 2. API Endpoints ✅
+### 2. Error Handling - **IMPROVED**
+- ✅ Better error messages for Redis/Celery connection issues
+- ✅ Specific handling for "Actor not found" errors
+- ✅ Jobs are properly marked as failed with error messages
+- ✅ Returns appropriate HTTP status codes (503 for service unavailable)
 
-#### GET /api/templates ✅
-- [x] Lists all templates (defaults + tenant's custom templates)
-- [x] Requires JWT authentication
-- [x] Returns proper JSON format with `variables` array
-- [x] Multi-tenant isolation (only shows tenant's custom templates)
+### 3. Data Extraction Logic - **ENHANCED**
+- ✅ Handles multiple field name variations
+- ✅ Supports nested data structures
+- ✅ Tries multiple field name patterns for each attribute
+- ✅ Better logging to debug Apify response structure
 
-#### POST /api/templates ✅
-- [x] Creates custom template for current tenant
-- [x] Requires JWT authentication
-- [x] Validates required fields (name, subject, body)
-- [x] Validates template variables (only allowed variables)
-- [x] Field length validation (name: 100, subject: 200, body: 5000)
-- [x] Returns 201 with created template
+### 4. Endpoints - **WORKING**
+- ✅ `POST /api/profiles/scrape` - Returns 202 (Accepted)
+- ✅ `POST /api/profiles/<profile_id>/scrape` - Returns 202 (Accepted)
+- ✅ `GET /api/jobs/<job_id>` - Returns 200 with job details
 
-#### GET /api/templates/{id} ✅
-- [x] Gets single template by ID
-- [x] Requires JWT authentication
-- [x] Default templates visible to all tenants
-- [x] Custom templates only visible to owner (403 if not owner)
-- [x] Returns 404 if template not found
+## ⚠️ Current Issue: Data Not Being Saved
 
-#### PATCH /api/templates/{id} ✅
-- [x] Updates template (name, subject, body)
-- [x] Requires JWT authentication
-- [x] Cannot update default templates (returns 400)
-- [x] Only owner can update (returns 403 if not owner)
-- [x] Validates template variables on update
-- [x] Updates `updated_at` timestamp
+### Problem
+- Profile scraping completes successfully (status = 'scraped')
+- But data fields (name, email, company, etc.) are empty
 
-#### DELETE /api/templates/{id} ✅
-- [x] Deletes custom template
-- [x] Requires JWT authentication
-- [x] Cannot delete default templates (returns 400)
-- [x] Only owner can delete (returns 403 if not owner)
-- [x] Returns success message
+### Root Cause
+The actor ID `apify/linkedin-profile-scraper` **does not exist** in Apify.
 
-#### POST /api/templates/{id}/preview ✅
-- [x] Previews template with sample data
-- [x] Requires JWT authentication
-- [x] Accepts optional sample variable values
-- [x] Replaces all placeholders with provided/default values
-- [x] Returns rendered subject and body
+### Solution Required
 
-### 3. Default Templates Seeding ✅
-- [x] 3 default templates seeded in migration:
-  - [x] **Professional** - Formal business tone
-  - [x] **Friendly** - Casual, friendly tone  
-  - [x] **Direct** - Short, to-the-point tone
-- [x] All have `is_default=true` and `tenant_id=NULL`
-- [x] Templates use all required variables
+1. **Update APIFY_PROFILE_ACTOR_ID in .env file**
+   ```env
+   APIFY_PROFILE_ACTOR_ID=your-valid-actor-id
+   ```
 
-### 4. Template Variables ✅
-- [x] Supported variables:
-  - [x] `{{recipient_name}}`
-  - [x] `{{company_name}}`
-  - [x] `{{product_name}}`
-  - [x] `{{sender_name}}`
-  - [x] `{{post_summary}}`
-- [x] Validation function checks for invalid variables
-- [x] Returns 400 error with message: "Variable {{invalid_var}} not allowed"
-- [x] Preview endpoint replaces variables correctly
+2. **Valid Actor Options:**
+   - `apify/linkedin-scraper`
+   - `apify/unlimited-leads-linkedin`
+   - `apify/linkedin-profile-enrichment`
+   - Or any other valid actor ID from your Apify account
 
-### 5. Multi-Tenant Support ✅
-- [x] Templates belong to `tenant_id`
-- [x] Default templates (`tenant_id=NULL`) visible to all tenants
-- [x] Custom templates isolated per tenant
-- [x] Cannot access/edit other tenants' templates (403 Forbidden)
-- [x] JWT token contains `tenant_id` for authorization
+3. **Verify the actor:**
+   - Actor must exist in Apify
+   - Actor must be accessible with your API token
+   - Actor must return data in a format we can parse
 
-### 6. Validation ✅
-- [x] Name: max 100 characters, required
-- [x] Subject: max 200 characters, required
-- [x] Body: max 5000 characters, required
-- [x] Template variables: only allowed variables accepted
-- [x] Proper error messages for validation failures
+## 📋 Verification Steps
 
-### 7. Response Format ✅
-- [x] Returns JSON with:
-  - [x] `template_id`
-  - [x] `name`
-  - [x] `subject`
-  - [x] `body`
-  - [x] `is_default`
-  - [x] `variables` (array of detected variables)
-  - [x] `created_at` (ISO format)
-  - [x] `updated_at` (ISO format)
-
-### 8. Integration ✅
-- [x] Blueprint registered in `app/__init__.py`
-- [x] Model exported in `app/models/__init__.py`
-- [x] No linting errors
-- [x] Follows existing codebase patterns
-
-## Test Commands
-
-### Run Migration
+### Step 1: Check Current Configuration
 ```bash
-flask db upgrade
+python -c "from app.config import Config; print('Actor ID:', Config.APIFY_PROFILE_ACTOR_ID)"
 ```
 
-### Test Endpoints (with JWT token)
-```bash
-# List templates
-curl -H "Authorization: Bearer <TOKEN>" http://localhost:5000/api/templates
-
-# Create template
-curl -X POST -H "Authorization: Bearer <TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Test","subject":"Hello {{recipient_name}}","body":"Hi {{recipient_name}}"}' \
-  http://localhost:5000/api/templates
-
-# Preview template
-curl -X POST -H "Authorization: Bearer <TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"recipient_name":"John"}' \
-  http://localhost:5000/api/templates/<template_id>/preview
+### Step 2: Update .env File
+Edit `.env` and set:
+```
+APIFY_PROFILE_ACTOR_ID=your-valid-actor-id
 ```
 
-## Status: ✅ ALL REQUIREMENTS IMPLEMENTED
+### Step 3: Restart Services
+- Restart Flask server
+- Restart Celery worker (if running)
 
+### Step 4: Test with New Profile
+```bash
+python verify_data_saving.py
+```
+
+### Step 5: Check Celery Worker Logs
+Look for these log messages:
+- `"Apify result keys: ..."` - Shows what fields Apify returned
+- `"Apify result sample: ..."` - Shows the actual data structure
+- `"Updating profile from Apify result - Keys: ..."` - Shows what we're trying to extract
+
+### Step 6: Verify Data in Database
+Check if data fields are populated after scraping completes.
+
+## 🔍 Debugging Tips
+
+1. **Check Celery Worker Logs:**
+   - Look for "Apify result keys:" messages
+   - This shows what data structure Apify is returning
+
+2. **Test Actor Directly:**
+   ```bash
+   python check_apify_response.py
+   ```
+   This will show you exactly what Apify returns
+
+3. **Check Job Status:**
+   - Use `GET /api/jobs/<job_id>` endpoint
+   - Check `result_data` field for failed profiles
+   - Look for error messages
+
+## ✅ Expected Behavior After Fix
+
+Once you set a valid actor ID:
+
+1. **Scraping completes** → Status = 'scraped'
+2. **Data is extracted** → Fields populated (name, email, company, etc.)
+3. **Data is saved** → All fields visible in database
+4. **Job shows success** → success_count > 0
+
+## 📝 Files Modified
+
+1. `app/api/profiles.py` - Error handling improvements
+2. `app/__init__.py` - Jobs blueprint registration
+3. `app/tasks/scraper.py` - Enhanced data extraction
+4. `app/config.py` - Added documentation
+5. `migrations/versions/f6e5d4c3b2a1_add_jobs_table.py` - Fixed migration
+6. `migrations/versions/b13bbce8fbd_fix_jobs_table_columns.py` - New migration
+
+## 🎯 Next Action Required
+
+**You need to set a valid APIFY_PROFILE_ACTOR_ID in your .env file.**
+
+The code is ready to save data - it just needs a valid actor that returns data!
