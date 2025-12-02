@@ -21,9 +21,9 @@ def get_anthropic_client():
     """Get or create Anthropic client"""
     global anthropic_client
     if anthropic_client is None:
-        api_key = os.getenv('ANTHROPIC_API_KEY')
+        api_key = os.getenv('CLAUDE_API_KEY')
         if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not configured")
+            raise ValueError("CLAUDE_API_KEY not configured")
         anthropic_client = Anthropic(api_key=api_key)
     return anthropic_client
 
