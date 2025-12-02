@@ -177,14 +177,50 @@ def analyze_single_post(post_id):
     if not post:
         return jsonify({"error": "Post not found"}), 404
     
-    # Queue Celery task
-    task = analyze_post.delay(post_id)
+    # Import here to avoid circular imports
+    from app.tasks.ai_analyzer import analyze_post
+    from app.tasks.celery_app import celery_app
     
-    return jsonify({
-        "job_id": task.id,
-        "post_id": post_id,
-        "status": "queued"
-    }), 202
+    # Check if Celery is properly configured before starting task
+    try:
+        # Check if broker is configured
+        broker_url = celery_app.conf.broker_url
+        if not broker_url or broker_url == 'memory://':
+            raise ValueError("Celery broker is not properly configured. Please check Redis connection.")
+    except Exception as celery_check_error:
+        current_app.logger.error(f"Post analyze: Celery configuration error: {str(celery_check_error)}")
+        return jsonify({
+            "error": "Celery/Redis service not available",
+            "details": str(celery_check_error),
+            "message": "Please ensure Redis is running and CELERY_BROKER_URL is configured"
+        }), 503
+    
+    # Start async Celery task
+    try:
+        task = analyze_post.delay(post_id)
+        current_app.logger.info(f"Post analyze: Started task_id={task.id}, post_id={post_id}")
+        return jsonify({
+            "job_id": task.id,
+            "post_id": post_id,
+            "status": "queued"
+        }), 202
+    except Exception as celery_error:
+        # Handle Celery connection errors specifically
+        error_msg = str(celery_error)
+        if 'Redis' in error_msg or 'broker' in error_msg.lower() or 'connection' in error_msg.lower():
+            current_app.logger.error(f"Post analyze: Celery/Redis connection error: {error_msg}")
+            return jsonify({
+                "error": "Celery/Redis connection failed",
+                "details": error_msg,
+                "message": "Please ensure Redis is running and accessible. Check that the Celery worker is also running."
+            }), 503
+        else:
+            # Re-raise other errors
+            current_app.logger.exception(f"Post analyze: Unexpected error: {error_msg}")
+            return jsonify({
+                "error": "Failed to start analysis job",
+                "details": error_msg
+            }), 500
 
 
 @bp.route('/analyze-batch', methods=['POST'])
@@ -231,19 +267,56 @@ def analyze_batch_posts():
             "missing_post_ids": list(missing_ids)
         }), 404
     
-    # Queue tasks for all posts
-    job_results = []
-    for post_id in post_ids:
-        task = analyze_post.delay(post_id)
-        job_results.append({
-            "post_id": post_id,
-            "job_id": task.id
-        })
+    # Import here to avoid circular imports
+    from app.tasks.ai_analyzer import analyze_post
+    from app.tasks.celery_app import celery_app
     
-    return jsonify({
-        "job_ids": [j["job_id"] for j in job_results],
-        "posts": job_results,
-        "count": len(job_results),
-        "status": "queued"
-    }), 202
+    # Check if Celery is properly configured before starting tasks
+    try:
+        # Check if broker is configured
+        broker_url = celery_app.conf.broker_url
+        if not broker_url or broker_url == 'memory://':
+            raise ValueError("Celery broker is not properly configured. Please check Redis connection.")
+    except Exception as celery_check_error:
+        current_app.logger.error(f"Post analyze batch: Celery configuration error: {str(celery_check_error)}")
+        return jsonify({
+            "error": "Celery/Redis service not available",
+            "details": str(celery_check_error),
+            "message": "Please ensure Redis is running and CELERY_BROKER_URL is configured"
+        }), 503
+    
+    # Queue tasks for all posts
+    try:
+        job_results = []
+        for post_id in post_ids:
+            task = analyze_post.delay(post_id)
+            job_results.append({
+                "post_id": post_id,
+                "job_id": task.id
+            })
+        
+        current_app.logger.info(f"Post analyze batch: Started {len(job_results)} tasks")
+        return jsonify({
+            "job_ids": [j["job_id"] for j in job_results],
+            "posts": job_results,
+            "count": len(job_results),
+            "status": "queued"
+        }), 202
+    except Exception as celery_error:
+        # Handle Celery connection errors specifically
+        error_msg = str(celery_error)
+        if 'Redis' in error_msg or 'broker' in error_msg.lower() or 'connection' in error_msg.lower():
+            current_app.logger.error(f"Post analyze batch: Celery/Redis connection error: {error_msg}")
+            return jsonify({
+                "error": "Celery/Redis connection failed",
+                "details": error_msg,
+                "message": "Please ensure Redis is running and accessible. Check that the Celery worker is also running."
+            }), 503
+        else:
+            # Re-raise other errors
+            current_app.logger.exception(f"Post analyze batch: Unexpected error: {error_msg}")
+            return jsonify({
+                "error": "Failed to start analysis jobs",
+                "details": error_msg
+            }), 500
 
