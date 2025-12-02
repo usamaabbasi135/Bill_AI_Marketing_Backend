@@ -7,7 +7,6 @@ from marshmallow import Schema, fields, validates, ValidationError
 from app.extensions import db
 from app.models.post import Post
 from app.models.company import Company
-from app.tasks.ai_analyzer import analyze_post
 from datetime import datetime
 from sqlalchemy import and_, or_
 
@@ -164,8 +163,9 @@ def analyze_single_post(post_id):
     Analyze a single post using Claude AI.
     
     Returns:
-        - job_id: Celery task ID for tracking
+        - job_id: Job ID for tracking
         - post_id: The post ID being analyzed
+        - status_url: URL to check job status
     """
     claims = get_jwt()
     tenant_id = claims.get('tenant_id')
@@ -179,33 +179,61 @@ def analyze_single_post(post_id):
     
     # Import here to avoid circular imports
     from app.tasks.ai_analyzer import analyze_post
+    from app.models.job import Job
+    from datetime import datetime
+    import uuid
     
-    # Start async Celery task
     try:
-        task = analyze_post.delay(post_id)
-        current_app.logger.info(f"Post analyze: Started task_id={task.id}, post_id={post_id}")
+        # Create job record
+        job_id = str(uuid.uuid4())
+        job = Job(
+            job_id=job_id,
+            tenant_id=tenant_id,
+            job_type='post_analyze',
+            status='pending',
+            total_items=1
+        )
+        db.session.add(job)
+        db.session.commit()
+        
+        current_app.logger.debug(f"Post analyze: Created job_id={job_id} for post_id={post_id}")
+        
+        # Start async Celery task
+        try:
+            task = analyze_post.delay(job_id, tenant_id, post_id)
+            current_app.logger.info(f"Post analyze: Started job_id={job_id}, task_id={task.id}, post_id={post_id}")
+        except Exception as celery_error:
+            # Handle Celery connection errors specifically
+            error_msg = str(celery_error)
+            if 'Redis' in error_msg or 'broker' in error_msg.lower() or 'connection' in error_msg.lower():
+                current_app.logger.error(f"Post analyze: Celery/Redis connection error: {error_msg}")
+                job.status = 'failed'
+                job.error_message = f"Celery/Redis connection failed: {error_msg}"
+                job.completed_at = datetime.utcnow()
+                db.session.commit()
+                return jsonify({
+                    "error": "Celery/Redis connection failed",
+                    "details": error_msg,
+                    "message": "Please ensure Redis is running and accessible. Check that the Celery worker is also running."
+                }), 503
+            else:
+                # Re-raise other errors
+                raise
+        
         return jsonify({
-            "job_id": task.id,
+            "message": "Analysis job started",
+            "job_id": job_id,
             "post_id": post_id,
-            "status": "queued"
+            "status": "queued",
+            "status_url": f"/api/jobs/{job_id}"
         }), 202
-    except Exception as celery_error:
-        # Handle Celery connection errors specifically
-        error_msg = str(celery_error)
-        if 'Redis' in error_msg or 'broker' in error_msg.lower() or 'connection' in error_msg.lower():
-            current_app.logger.error(f"Post analyze: Celery/Redis connection error: {error_msg}")
-            return jsonify({
-                "error": "Celery/Redis connection failed",
-                "details": error_msg,
-                "message": "Please ensure Redis is running and accessible. Check that the Celery worker is also running."
-            }), 503
-        else:
-            # Re-raise other errors
-            current_app.logger.exception(f"Post analyze: Unexpected error: {error_msg}")
-            return jsonify({
-                "error": "Failed to start analysis job",
-                "details": error_msg
-            }), 500
+    except Exception as e:
+        current_app.logger.exception(f"Post analyze: Error starting job for post_id={post_id}: {str(e)}")
+        db.session.rollback()
+        return jsonify({
+            "error": "Failed to start analysis job",
+            "details": str(e)
+        }), 500
 
 
 @bp.route('/analyze-batch', methods=['POST'])
@@ -254,19 +282,60 @@ def analyze_batch_posts():
     
     # Import here to avoid circular imports
     from app.tasks.ai_analyzer import analyze_post
+    from app.models.job import Job
+    from datetime import datetime
+    import uuid
     
     # Queue tasks for all posts
     try:
         job_results = []
         for post_id in post_ids:
-            task = analyze_post.delay(post_id)
-            job_results.append({
-                "post_id": post_id,
-                "job_id": task.id
-            })
+            # Create job record for each post
+            job_id = str(uuid.uuid4())
+            job = Job(
+                job_id=job_id,
+                tenant_id=tenant_id,
+                job_type='post_analyze',
+                status='pending',
+                total_items=1
+            )
+            db.session.add(job)
+            
+            try:
+                task = analyze_post.delay(job_id, tenant_id, post_id)
+                job_results.append({
+                    "post_id": post_id,
+                    "job_id": job_id
+                })
+            except Exception as celery_error:
+                # Handle Celery connection errors for this specific job
+                error_msg = str(celery_error)
+                job.status = 'failed'
+                job.error_message = f"Celery/Redis connection failed: {error_msg}"
+                job.completed_at = datetime.utcnow()
+                job_results.append({
+                    "post_id": post_id,
+                    "job_id": job_id,
+                    "error": "Failed to queue task"
+                })
         
-        current_app.logger.info(f"Post analyze batch: Started {len(job_results)} tasks")
+        db.session.commit()
+        current_app.logger.info(f"Post analyze batch: Started {len(job_results)} jobs")
+        
+        # Check if any jobs failed to queue
+        failed_count = sum(1 for j in job_results if 'error' in j)
+        if failed_count > 0:
+            return jsonify({
+                "error": "Some jobs failed to queue",
+                "job_ids": [j["job_id"] for j in job_results],
+                "posts": job_results,
+                "count": len(job_results),
+                "failed_count": failed_count,
+                "status": "partial"
+            }), 207  # Multi-Status
+        
         return jsonify({
+            "message": "Analysis jobs started",
             "job_ids": [j["job_id"] for j in job_results],
             "posts": job_results,
             "count": len(job_results),
@@ -275,6 +344,7 @@ def analyze_batch_posts():
     except Exception as celery_error:
         # Handle Celery connection errors specifically
         error_msg = str(celery_error)
+        db.session.rollback()
         if 'Redis' in error_msg or 'broker' in error_msg.lower() or 'connection' in error_msg.lower():
             current_app.logger.error(f"Post analyze batch: Celery/Redis connection error: {error_msg}")
             return jsonify({
