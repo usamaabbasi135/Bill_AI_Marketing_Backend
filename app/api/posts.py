@@ -179,21 +179,6 @@ def analyze_single_post(post_id):
     
     # Import here to avoid circular imports
     from app.tasks.ai_analyzer import analyze_post
-    from app.tasks.celery_app import celery_app
-    
-    # Check if Celery is properly configured before starting task
-    try:
-        # Check if broker is configured
-        broker_url = celery_app.conf.broker_url
-        if not broker_url or broker_url == 'memory://':
-            raise ValueError("Celery broker is not properly configured. Please check Redis connection.")
-    except Exception as celery_check_error:
-        current_app.logger.error(f"Post analyze: Celery configuration error: {str(celery_check_error)}")
-        return jsonify({
-            "error": "Celery/Redis service not available",
-            "details": str(celery_check_error),
-            "message": "Please ensure Redis is running and CELERY_BROKER_URL is configured"
-        }), 503
     
     # Start async Celery task
     try:
@@ -269,21 +254,6 @@ def analyze_batch_posts():
     
     # Import here to avoid circular imports
     from app.tasks.ai_analyzer import analyze_post
-    from app.tasks.celery_app import celery_app
-    
-    # Check if Celery is properly configured before starting tasks
-    try:
-        # Check if broker is configured
-        broker_url = celery_app.conf.broker_url
-        if not broker_url or broker_url == 'memory://':
-            raise ValueError("Celery broker is not properly configured. Please check Redis connection.")
-    except Exception as celery_check_error:
-        current_app.logger.error(f"Post analyze batch: Celery configuration error: {str(celery_check_error)}")
-        return jsonify({
-            "error": "Celery/Redis service not available",
-            "details": str(celery_check_error),
-            "message": "Please ensure Redis is running and CELERY_BROKER_URL is configured"
-        }), 503
     
     # Queue tasks for all posts
     try:
