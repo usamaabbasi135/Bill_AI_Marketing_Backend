@@ -57,6 +57,12 @@ def create_app(config_class=Config):
         app.register_blueprint(profiles.bp, url_prefix='/api/profiles')
     except ImportError:
         pass  # profiles module doesn't exist yet
+    # Register jobs blueprint if it exists
+    try:
+        from app.api import jobs
+        app.register_blueprint(jobs.bp, url_prefix='/api/jobs')
+    except ImportError:
+        pass  # jobs module doesn't exist yet
 
     # JWT error handlers for clearer responses
     @jwt.unauthorized_loader

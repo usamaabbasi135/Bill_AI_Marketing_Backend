@@ -26,42 +26,58 @@ def upgrade():
     if 'jobs' in inspector.get_table_names():
         # Table exists - check if it needs to be altered
         existing_cols = [col['name'] for col in inspector.get_columns('jobs')]
-        required_cols = ['job_id', 'tenant_id', 'job_type', 'status', 'total_items', 
-                        'completed_items', 'success_count', 'failed_count', 'result_data', 
-                        'error_message', 'created_at', 'updated_at', 'completed_at']
         
-        # If table has old structure (task_name, result, error), drop and recreate
-        if 'task_name' in existing_cols or 'result' in existing_cols:
-            op.drop_table('jobs')
-            op.create_table('jobs',
-                sa.Column('job_id', sa.String(length=36), nullable=False),
-                sa.Column('tenant_id', sa.String(length=36), nullable=False),
-                sa.Column('job_type', sa.String(length=50), nullable=False),
-                sa.Column('status', sa.String(length=50), nullable=False),
-                sa.Column('total_items', sa.Integer(), nullable=True),
-                sa.Column('completed_items', sa.Integer(), nullable=True),
-                sa.Column('success_count', sa.Integer(), nullable=True),
-                sa.Column('failed_count', sa.Integer(), nullable=True),
-                sa.Column('result_data', sa.Text(), nullable=True),
-                sa.Column('error_message', sa.Text(), nullable=True),
-                sa.Column('created_at', sa.DateTime(), nullable=True),
-                sa.Column('updated_at', sa.DateTime(), nullable=True),
-                sa.Column('completed_at', sa.DateTime(), nullable=True),
-                sa.ForeignKeyConstraint(['tenant_id'], ['tenants.tenant_id'], ondelete='CASCADE'),
-                sa.PrimaryKeyConstraint('job_id')
-            )
-        # If table already has correct structure, skip
+        # Add missing new columns if they don't exist
+        if 'job_type' not in existing_cols:
+            op.add_column('jobs', sa.Column('job_type', sa.String(length=50), nullable=True))
+        if 'total_items' not in existing_cols:
+            op.add_column('jobs', sa.Column('total_items', sa.Integer(), nullable=True, server_default='0'))
+        if 'completed_items' not in existing_cols:
+            op.add_column('jobs', sa.Column('completed_items', sa.Integer(), nullable=True, server_default='0'))
+        if 'success_count' not in existing_cols:
+            op.add_column('jobs', sa.Column('success_count', sa.Integer(), nullable=True, server_default='0'))
+        if 'failed_count' not in existing_cols:
+            op.add_column('jobs', sa.Column('failed_count', sa.Integer(), nullable=True, server_default='0'))
+        if 'result_data' not in existing_cols:
+            op.add_column('jobs', sa.Column('result_data', sa.Text(), nullable=True))
+        if 'error_message' not in existing_cols:
+            op.add_column('jobs', sa.Column('error_message', sa.Text(), nullable=True))
+        if 'completed_at' not in existing_cols:
+            op.add_column('jobs', sa.Column('completed_at', sa.DateTime(), nullable=True))
+        
+        # Ensure legacy fields exist (for backward compatibility)
+        if 'task_name' not in existing_cols:
+            op.add_column('jobs', sa.Column('task_name', sa.String(length=255), nullable=True))
+        if 'result' not in existing_cols:
+            op.add_column('jobs', sa.Column('result', sa.JSON(), nullable=True))
+        if 'error' not in existing_cols:
+            op.add_column('jobs', sa.Column('error', sa.Text(), nullable=True))
+        
+        # Ensure status column exists and has default
+        if 'status' not in existing_cols:
+            op.add_column('jobs', sa.Column('status', sa.String(length=50), nullable=False, server_default='pending'))
+        else:
+            # Update status column to have default if it doesn't
+            try:
+                op.alter_column('jobs', 'status', server_default='pending')
+            except:
+                pass  # Server default might already be set or not supported
     else:
-        # Table doesn't exist, create it
+        # Table doesn't exist, create it with both legacy and new fields
         op.create_table('jobs',
             sa.Column('job_id', sa.String(length=36), nullable=False),
             sa.Column('tenant_id', sa.String(length=36), nullable=False),
-            sa.Column('job_type', sa.String(length=50), nullable=False),
-            sa.Column('status', sa.String(length=50), nullable=False),
-            sa.Column('total_items', sa.Integer(), nullable=True),
-            sa.Column('completed_items', sa.Integer(), nullable=True),
-            sa.Column('success_count', sa.Integer(), nullable=True),
-            sa.Column('failed_count', sa.Integer(), nullable=True),
+            # Legacy fields (for backward compatibility)
+            sa.Column('task_name', sa.String(length=255), nullable=True),
+            sa.Column('result', sa.JSON(), nullable=True),
+            sa.Column('error', sa.Text(), nullable=True),
+            # New fields
+            sa.Column('job_type', sa.String(length=50), nullable=True),  # nullable to match model
+            sa.Column('status', sa.String(length=50), nullable=False, server_default='pending'),
+            sa.Column('total_items', sa.Integer(), nullable=True, server_default='0'),
+            sa.Column('completed_items', sa.Integer(), nullable=True, server_default='0'),
+            sa.Column('success_count', sa.Integer(), nullable=True, server_default='0'),
+            sa.Column('failed_count', sa.Integer(), nullable=True, server_default='0'),
             sa.Column('result_data', sa.Text(), nullable=True),
             sa.Column('error_message', sa.Text(), nullable=True),
             sa.Column('created_at', sa.DateTime(), nullable=True),
