@@ -5,7 +5,8 @@ import os
 import logging
 from datetime import datetime
 from anthropic import Anthropic
-from app.extensions import celery, db
+from app.tasks.celery_app import celery_app
+from app.extensions import db
 from app.models.post import Post
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ def get_anthropic_client():
     return anthropic_client
 
 
-@celery.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=3)
 def analyze_post(self, post_id):
     """
     Analyze a LinkedIn post using Claude AI to detect product launches.
