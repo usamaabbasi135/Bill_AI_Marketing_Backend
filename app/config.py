@@ -31,15 +31,7 @@ class Config:
     APIFY_API_TOKEN = os.getenv('APIFY_API_TOKEN')
     APIFY_ACTOR_ID = 'apimaestro/linkedin-company-posts'
     
-    # Apify Profile Actor ID - Must be set to a valid actor ID
-    # Format: 'username/actor-name'
-    # Common options:
-    #   - apify/linkedin-profile-scraper
-    #   - apify/linkedin-scraper  
-    #   - apify/unlimited-leads-linkedin
-    #   - apify/linkedin-profile-enrichment
-    # Note: The default 'apify/linkedin-profile-scraper' may not exist - set APIFY_PROFILE_ACTOR_ID in your .env file
-    APIFY_PROFILE_ACTOR_ID = os.getenv('APIFY_PROFILE_ACTOR_ID', 'apify/linkedin-profile-scraper')
+    APIFY_PROFILE_ACTOR_ID = os.getenv('APIFY_PROFILE_ACTOR_ID', 'dev_fusion/linkedin-profile-scraper')
     # AWS SES Configuration
     AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
     AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
