@@ -173,35 +173,35 @@ Analyze and return JSON only:"""
                 raise self.retry(exc=api_error, countdown=30 * (2 ** self.request.retries))
             
         except Exception as e:
-        logger.error(f"Error analyzing post {post_id}: {str(e)}")
-        
-        # If max retries reached, mark as failed
-        if self.request.retries >= self.max_retries:
-            try:
-                if job:
-                    job.status = 'failed'
-                    job.error_message = f"Analysis failed after retries: {str(e)}"
-                    job.completed_at = datetime.utcnow()
-                    job.completed_items = 1
-                    job.failed_count = 1
-                    job.updated_at = datetime.utcnow()
-                    db.session.commit()
-                
-                post = Post.query.filter_by(post_id=post_id, tenant_id=tenant_id).first()
-                if post:
-                    post.score = 0
-                    post.ai_judgement = 'other'
-                    post.analyzed_at = datetime.utcnow()
-                    db.session.commit()
-            except Exception as db_error:
-                logger.error(f"Failed to update post {post_id} after max retries: {str(db_error)}")
+            logger.error(f"Error analyzing post {post_id}: {str(e)}")
             
-            return {
-                "status": "error",
-                "error": "Analysis failed after retries",
-                "post_id": post_id,
-                "details": str(e)
-            }
-        
-        raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
+            # If max retries reached, mark as failed
+            if self.request.retries >= self.max_retries:
+                try:
+                    if job:
+                        job.status = 'failed'
+                        job.error_message = f"Analysis failed after retries: {str(e)}"
+                        job.completed_at = datetime.utcnow()
+                        job.completed_items = 1
+                        job.failed_count = 1
+                        job.updated_at = datetime.utcnow()
+                        db.session.commit()
+                    
+                    post = Post.query.filter_by(post_id=post_id, tenant_id=tenant_id).first()
+                    if post:
+                        post.score = 0
+                        post.ai_judgement = 'other'
+                        post.analyzed_at = datetime.utcnow()
+                        db.session.commit()
+                except Exception as db_error:
+                    logger.error(f"Failed to update post {post_id} after max retries: {str(db_error)}")
+                
+                return {
+                    "status": "error",
+                    "error": "Analysis failed after retries",
+                    "post_id": post_id,
+                    "details": str(e)
+                }
+            
+            raise self.retry(exc=e, countdown=30 * (2 ** self.request.retries))
 
