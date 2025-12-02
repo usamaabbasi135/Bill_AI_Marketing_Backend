@@ -550,10 +550,25 @@ def _call_apify_with_retry(client, linkedin_url, profile_id, logger):
             
             if dataset_items:
                 apify_result = dataset_items[0]  # First result
-                logger.debug(f"Successfully retrieved data from Apify for profile {profile_id}")
+                logger.info(f"Successfully retrieved data from Apify for profile {profile_id}")
+                logger.info(f"Dataset contains {len(dataset_items)} item(s)")
+                
+                # Log the structure for debugging
+                if isinstance(apify_result, dict):
+                    logger.info(f"Apify result keys: {list(apify_result.keys())}")
+                    # Log a sample of the data (first 1000 chars to avoid log spam)
+                    result_sample = json.dumps(apify_result, indent=2, default=str)[:1000]
+                    logger.debug(f"Apify result sample: {result_sample}")
+                else:
+                    logger.warning(f"Apify result is not a dict, type: {type(apify_result)}")
+                
                 break
             else:
-                logger.warning(f"No data returned from Apify for profile {profile_id}")
+                logger.warning(f"No data returned from Apify dataset for profile {profile_id}")
+                logger.warning(f"Run status: {run.get('status')}, Run ID: {run.get('id')}")
+                # Check if run has any error messages
+                if run.get('status') == 'SUCCEEDED' and not dataset_items:
+                    logger.warning("Run succeeded but dataset is empty - actor may have returned no data")
                 last_exception = Exception("No data returned from Apify dataset")
                 
         except (Timeout, ConnectionError) as e:
@@ -621,31 +636,165 @@ def _call_apify_with_retry(client, linkedin_url, profile_id, logger):
 def _update_profile_from_apify_result(profile, apify_result):
     """
     Update profile fields from Apify result data.
-    Optimized to only update fields that have values.
+    Handles different Apify actor response formats, including nested structures.
     """
     now = datetime.utcnow()
     
-    # Update fields only if Apify returned values
-    if apify_result.get('name'):
-        profile.person_name = apify_result.get('name')
-    if apify_result.get('email'):
-        profile.email = apify_result.get('email')
-    if apify_result.get('phone'):
-        profile.phone = apify_result.get('phone')
-    if apify_result.get('company'):
-        profile.company = apify_result.get('company')
-    if apify_result.get('jobTitle'):
-        profile.job_title = apify_result.get('jobTitle')
-    if apify_result.get('headline'):
-        profile.headline = apify_result.get('headline')
-    if apify_result.get('location'):
-        profile.location = apify_result.get('location')
-    if apify_result.get('industry'):
-        profile.industry = apify_result.get('industry')
+    # Log what we received for debugging
+    if isinstance(apify_result, dict):
+        logger.info(f"Updating profile from Apify result - Keys: {list(apify_result.keys())}")
+        logger.debug(f"Apify result sample: {json.dumps(apify_result, indent=2, default=str)[:1000]}")
+    else:
+        logger.warning(f"Apify result is not a dict, type: {type(apify_result)}")
+        # If it's not a dict, try to extract data from it
+        if hasattr(apify_result, '__dict__'):
+            apify_result = apify_result.__dict__
+        else:
+            logger.error(f"Cannot process Apify result of type {type(apify_result)}")
+            profile.status = 'scraped'
+            profile.scraped_at = now
+            return
     
-    # Always update status and timestamp on success
+    # Helper function to get nested values
+    def get_nested_value(data, *keys):
+        """Get value from nested dict/list using multiple keys."""
+        if not isinstance(data, (dict, list)):
+            return None
+        current = data
+        for key in keys:
+            if current is None:
+                return None
+            if isinstance(current, dict):
+                current = current.get(key)
+            elif isinstance(current, list) and isinstance(key, int) and 0 <= key < len(current):
+                current = current[key]
+            else:
+                return None
+        return current
+    
+    # Different Apify actors return data in different formats
+    # Try multiple possible field names for each attribute, including nested structures
+    
+    # Person Name - try: name, fullName, full_name, personName, title, profile.name, data.name
+    person_name = (
+        get_nested_value(apify_result, 'name') or
+        get_nested_value(apify_result, 'fullName') or
+        get_nested_value(apify_result, 'full_name') or
+        get_nested_value(apify_result, 'personName') or
+        get_nested_value(apify_result, 'title') or
+        get_nested_value(apify_result, 'profile', 'name') or
+        get_nested_value(apify_result, 'data', 'name') or
+        apify_result.get('name') or 
+        apify_result.get('fullName') or 
+        apify_result.get('full_name') or 
+        apify_result.get('personName') or
+        apify_result.get('title') or
+        None
+    )
+    if person_name:
+        profile.person_name = str(person_name).strip() if person_name else None
+    
+    # Email - try: email, emailAddress, email_address, contactEmail, profile.email, data.email
+    email = (
+        get_nested_value(apify_result, 'email') or
+        get_nested_value(apify_result, 'emailAddress') or
+        get_nested_value(apify_result, 'email_address') or
+        get_nested_value(apify_result, 'contactEmail') or
+        get_nested_value(apify_result, 'profile', 'email') or
+        get_nested_value(apify_result, 'data', 'email') or
+        apify_result.get('email') or 
+        apify_result.get('emailAddress') or 
+        apify_result.get('email_address') or 
+        apify_result.get('contactEmail') or
+        None
+    )
+    if email:
+        profile.email = str(email).strip() if email else None
+    
+    # Phone - try: phone, phoneNumber, phone_number, contactPhone
+    phone = (
+        apify_result.get('phone') or 
+        apify_result.get('phoneNumber') or 
+        apify_result.get('phone_number') or 
+        apify_result.get('contactPhone') or
+        None
+    )
+    if phone:
+        profile.phone = phone
+    
+    # Company - try: company, companyName, company_name, currentCompany, organization, experience.company
+    company = (
+        get_nested_value(apify_result, 'company') or
+        get_nested_value(apify_result, 'companyName') or
+        get_nested_value(apify_result, 'company_name') or
+        get_nested_value(apify_result, 'currentCompany') or
+        get_nested_value(apify_result, 'organization') or
+        get_nested_value(apify_result, 'experience', 0, 'company') if isinstance(apify_result.get('experience'), list) and len(apify_result.get('experience', [])) > 0 else None or
+        apify_result.get('company') or 
+        apify_result.get('companyName') or 
+        apify_result.get('company_name') or 
+        apify_result.get('currentCompany') or
+        apify_result.get('organization') or
+        None
+    )
+    if company:
+        profile.company = str(company).strip() if company else None
+    
+    # Job Title - try: jobTitle, job_title, position, title, currentPosition, experience.position
+    job_title = (
+        get_nested_value(apify_result, 'jobTitle') or
+        get_nested_value(apify_result, 'job_title') or
+        get_nested_value(apify_result, 'position') or
+        get_nested_value(apify_result, 'currentPosition') or
+        get_nested_value(apify_result, 'experience', 0, 'position') if isinstance(apify_result.get('experience'), list) and len(apify_result.get('experience', [])) > 0 else None or
+        apify_result.get('jobTitle') or 
+        apify_result.get('job_title') or 
+        apify_result.get('position') or 
+        apify_result.get('currentPosition') or
+        None
+    )
+    if job_title:
+        profile.job_title = str(job_title).strip() if job_title else None
+    
+    # Headline - try: headline, summary, bio, description
+    headline = (
+        apify_result.get('headline') or 
+        apify_result.get('summary') or 
+        apify_result.get('bio') or 
+        apify_result.get('description') or
+        None
+    )
+    if headline:
+        profile.headline = headline
+    
+    # Location - try: location, city, address, locationName
+    location = (
+        apify_result.get('location') or 
+        apify_result.get('city') or 
+        apify_result.get('address') or 
+        apify_result.get('locationName') or
+        None
+    )
+    if location:
+        profile.location = location
+    
+    # Industry - try: industry, sector, industryType
+    industry = (
+        apify_result.get('industry') or 
+        apify_result.get('sector') or 
+        apify_result.get('industryType') or
+        None
+    )
+    if industry:
+        profile.industry = industry
+    
+    # Always update status and timestamp on success (even if no data was extracted)
     profile.status = 'scraped'
     profile.scraped_at = now
+    
+    # Log if no data was extracted (for debugging)
+    if not any([person_name, email, phone, company, job_title, headline, location, industry]):
+        logger.warning(f"Profile {profile.profile_id} marked as scraped but no data fields were populated. Apify result keys: {list(apify_result.keys()) if isinstance(apify_result, dict) else type(apify_result)}")
 
 
 def _categorize_error(error):
