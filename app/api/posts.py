@@ -219,14 +219,14 @@ def analyze_single_post(post_id):
             else:
                 # Re-raise other errors
                 raise
-        
-        return jsonify({
+    
+    return jsonify({
             "message": "Analysis job started",
             "job_id": job_id,
-            "post_id": post_id,
+        "post_id": post_id,
             "status": "queued",
             "status_url": f"/api/jobs/{job_id}"
-        }), 202
+    }), 202
     except Exception as e:
         current_app.logger.exception(f"Post analyze: Error starting job for post_id={post_id}: {str(e)}")
         db.session.rollback()
@@ -288,8 +288,8 @@ def analyze_batch_posts():
     
     # Queue tasks for all posts
     try:
-        job_results = []
-        for post_id in post_ids:
+    job_results = []
+    for post_id in post_ids:
             # Create job record for each post
             job_id = str(uuid.uuid4())
             job = Job(
@@ -313,8 +313,8 @@ def analyze_batch_posts():
                 job.status = 'failed'
                 job.error_message = f"Celery/Redis connection failed: {error_msg}"
                 job.completed_at = datetime.utcnow()
-                job_results.append({
-                    "post_id": post_id,
+        job_results.append({
+            "post_id": post_id,
                     "job_id": job_id,
                     "error": "Failed to queue task"
                 })
@@ -333,14 +333,14 @@ def analyze_batch_posts():
                 "failed_count": failed_count,
                 "status": "partial"
             }), 207  # Multi-Status
-        
-        return jsonify({
+    
+    return jsonify({
             "message": "Analysis jobs started",
-            "job_ids": [j["job_id"] for j in job_results],
-            "posts": job_results,
-            "count": len(job_results),
-            "status": "queued"
-        }), 202
+        "job_ids": [j["job_id"] for j in job_results],
+        "posts": job_results,
+        "count": len(job_results),
+        "status": "queued"
+    }), 202
     except Exception as celery_error:
         # Handle Celery connection errors specifically
         error_msg = str(celery_error)
