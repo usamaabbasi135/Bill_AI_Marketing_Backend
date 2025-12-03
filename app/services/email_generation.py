@@ -180,9 +180,13 @@ def call_claude_api(prompt: str, max_retries: int = 3) -> Dict:
             result = json.loads(content)
             
             # Log token usage
+            usage = getattr(response, 'usage', None)
+            input_tokens = getattr(usage, 'input_tokens', 0) if usage else 0
+            output_tokens = getattr(usage, 'output_tokens', 0) if usage else 0
+            
             logger.info("Claude API call successful", extra={
-                "input_tokens": getattr(response, 'usage', {}).get('input_tokens', 0),
-                "output_tokens": getattr(response, 'usage', {}).get('output_tokens', 0),
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
                 "attempt": attempt + 1,
                 "model": working_model
             })
