@@ -288,8 +288,8 @@ def analyze_batch_posts():
     
     # Queue tasks for all posts
     try:
-    job_results = []
-    for post_id in post_ids:
+        job_results = []
+        for post_id in post_ids:
             # Create job record for each post
             job_id = str(uuid.uuid4())
             job = Job(
@@ -359,4 +359,3 @@ def analyze_batch_posts():
                 "error": "Failed to start analysis jobs",
                 "details": error_msg
             }), 500
-
