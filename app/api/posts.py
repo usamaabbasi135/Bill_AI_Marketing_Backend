@@ -219,14 +219,14 @@ def analyze_single_post(post_id):
             else:
                 # Re-raise other errors
                 raise
-    
-    return jsonify({
+        
+        return jsonify({
             "message": "Analysis job started",
             "job_id": job_id,
-        "post_id": post_id,
+            "post_id": post_id,
             "status": "queued",
             "status_url": f"/api/jobs/{job_id}"
-    }), 202
+        }), 202
     except Exception as e:
         current_app.logger.exception(f"Post analyze: Error starting job for post_id={post_id}: {str(e)}")
         db.session.rollback()
