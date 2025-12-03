@@ -313,8 +313,8 @@ def analyze_batch_posts():
                 job.status = 'failed'
                 job.error_message = f"Celery/Redis connection failed: {error_msg}"
                 job.completed_at = datetime.utcnow()
-        job_results.append({
-            "post_id": post_id,
+                job_results.append({
+                    "post_id": post_id,
                     "job_id": job_id,
                     "error": "Failed to queue task"
                 })
@@ -333,14 +333,14 @@ def analyze_batch_posts():
                 "failed_count": failed_count,
                 "status": "partial"
             }), 207  # Multi-Status
-    
-    return jsonify({
+        
+        return jsonify({
             "message": "Analysis jobs started",
-        "job_ids": [j["job_id"] for j in job_results],
-        "posts": job_results,
-        "count": len(job_results),
-        "status": "queued"
-    }), 202
+            "job_ids": [j["job_id"] for j in job_results],
+            "posts": job_results,
+            "count": len(job_results),
+            "status": "queued"
+        }), 202
     except Exception as celery_error:
         # Handle Celery connection errors specifically
         error_msg = str(celery_error)
