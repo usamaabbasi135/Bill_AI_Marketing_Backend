@@ -27,10 +27,8 @@ class Config:
     CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY')
     # Support comma-separated list of models for fallback
     # Updated to use available 4.5 models: Opus 4.5, Sonnet 4.5, Haiku 4.5
-    # Note: claude-3-5-sonnet models are deprecated/not available
-    # Prioritizing Opus 4.5 and Haiku 4.5, with older models as fallbacks
-    # Model names follow pattern: claude-{version}-{model}-{date}
-    _claude_models = os.getenv('CLAUDE_MODEL', 'claude-3-5-opus-20241022,claude-3-5-haiku-20241022,claude-3-opus-20240229,claude-3-haiku-20240307')
+    # Model names use simplified format: claude-{model}-{version}
+    _claude_models = os.getenv('CLAUDE_MODEL', 'claude-sonnet-4-5,claude-opus-4-5,claude-haiku-4-5,claude-3-5-opus-20241022,claude-3-5-haiku-20241022')
     CLAUDE_MODELS = [m.strip() for m in _claude_models.split(',')]
     CLAUDE_MODEL = CLAUDE_MODELS[0]  # Default to first model for backward compatibility
     CLAUDE_MAX_TOKENS = int(os.getenv('CLAUDE_MAX_TOKENS', '800'))
