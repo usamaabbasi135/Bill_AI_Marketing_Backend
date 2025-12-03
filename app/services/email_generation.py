@@ -15,6 +15,66 @@ from app.models.campaign import CampaignProfile
 
 logger = logging.getLogger(__name__)
 
+# Cache for working model (to avoid trying all models on every call)
+_working_model_cache = None
+
+
+def get_working_claude_model(client, failed_model=None):
+    """
+    Get a working Claude model, trying multiple models if needed.
+    Caches the working model to avoid repeated API calls.
+    
+    Args:
+        client: Anthropic client instance
+        failed_model: If provided, this model failed and we should try the next one
+    
+    Returns:
+        str: The first working model name
+    """
+    global _working_model_cache
+    from app.config import Config
+    
+    # If a model failed, clear cache and find a new one
+    if failed_model:
+        _working_model_cache = None
+        # Find the index of the failed model and start from the next one
+        try:
+            failed_index = Config.CLAUDE_MODELS.index(failed_model)
+            models_to_try = Config.CLAUDE_MODELS[failed_index + 1:]
+        except ValueError:
+            models_to_try = Config.CLAUDE_MODELS
+    else:
+        # Return cached model if available
+        if _working_model_cache:
+            return _working_model_cache
+        models_to_try = Config.CLAUDE_MODELS
+    
+    # Try each model in order
+    for model_name in models_to_try:
+        try:
+            # Test the model with a minimal request
+            test_response = client.messages.create(
+                model=model_name,
+                max_tokens=10,
+                messages=[{"role": "user", "content": "test"}]
+            )
+            # If successful, cache and return this model
+            _working_model_cache = model_name
+            logger.info(f"Using Claude model: {model_name}")
+            return model_name
+        except Exception as e:
+            error_str = str(e).lower()
+            # If it's a 404 (model not found), try next model
+            if "404" in error_str or "not_found" in error_str or "model not found" in error_str:
+                logger.warning(f"Model {model_name} not available, trying next...")
+                continue
+            # For other errors (auth, etc.), don't try other models
+            logger.error(f"Error testing model {model_name}: {e}")
+            raise
+    
+    # If all models failed, raise error
+    raise ValueError(f"None of the configured Claude models are available: {Config.CLAUDE_MODELS}")
+
 
 def extract_first_name(full_name: Optional[str]) -> str:
     """Extract first name from full name."""
@@ -89,10 +149,13 @@ def call_claude_api(prompt: str, max_retries: int = 3) -> Dict:
     
     client = Anthropic(api_key=api_key)
     
+    from app.config import Config
+    working_model = get_working_claude_model(client)
+    
     for attempt in range(max_retries):
         try:
             response = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=working_model,
                 max_tokens=2000,
                 messages=[{
                     "role": "user",
@@ -117,30 +180,49 @@ def call_claude_api(prompt: str, max_retries: int = 3) -> Dict:
             result = json.loads(content)
             
             # Log token usage
+            usage = getattr(response, 'usage', None)
+            input_tokens = getattr(usage, 'input_tokens', 0) if usage else 0
+            output_tokens = getattr(usage, 'output_tokens', 0) if usage else 0
+            
             logger.info("Claude API call successful", extra={
-                "input_tokens": getattr(response, 'usage', {}).get('input_tokens', 0),
-                "output_tokens": getattr(response, 'usage', {}).get('output_tokens', 0),
-                "attempt": attempt + 1
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "attempt": attempt + 1,
+                "model": working_model
             })
             
             return result
             
         except Exception as e:
             error_msg = str(e)
+            error_msg_lower = error_msg.lower()
+            
+            # If it's a 404 (model not found), try next model
+            if "404" in error_msg or "not_found" in error_msg_lower or "model not found" in error_msg_lower:
+                logger.warning(f"Model {working_model} not found, trying next available model...")
+                try:
+                    working_model = get_working_claude_model(client, failed_model=working_model)
+                    # Retry immediately with new model (don't count as attempt)
+                    continue
+                except Exception as fallback_error:
+                    logger.error(f"All Claude models failed: {fallback_error}")
+                    raise ValueError(f"All configured models failed: {str(fallback_error)}")
+            
             logger.warning(f"Claude API call failed (attempt {attempt + 1}/{max_retries})", extra={
                 "error": error_msg,
-                "attempt": attempt + 1
+                "attempt": attempt + 1,
+                "model": working_model
             })
             
             # Check for rate limit
-            if "rate limit" in error_msg.lower() or "429" in error_msg:
+            if "rate limit" in error_msg_lower or "429" in error_msg:
                 wait_time = (attempt + 1) * 2  # Exponential backoff
                 logger.info(f"Rate limit hit, waiting {wait_time} seconds")
                 time.sleep(wait_time)
                 continue
             
             # Check for timeout
-            if "timeout" in error_msg.lower() or attempt < max_retries - 1:
+            if "timeout" in error_msg_lower or attempt < max_retries - 1:
                 wait_time = (attempt + 1) * 1
                 time.sleep(wait_time)
                 continue

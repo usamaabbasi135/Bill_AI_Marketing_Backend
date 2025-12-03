@@ -88,17 +88,6 @@ def email_to_dict(email, include_full_details=False):
             }
     
     return data
-def email_to_dict(email):
-    """Convert Email model to dictionary."""
-    return {
-        "email_id": email.email_id,
-        "post_id": email.post_id,
-        "profile_id": email.profile_id,
-        "subject": email.subject,
-        "body": email.body,
-        "status": email.status,
-        "created_at": email.created_at.isoformat() if email.created_at else None
-    }
 
 
 @bp.route('/generate', methods=['POST'])
@@ -342,19 +331,16 @@ def get_email(email_id):
     if not tenant_id:
         return jsonify({"error": "Unauthorized"}), 401
     
-    # Eager load relationships
+    # Eager load relationships and filter out soft-deleted emails
     email = Email.query.options(
         joinedload(Email.post).joinedload(Post.company),
         joinedload(Email.profile)
-    ).filter_by(email_id=email_id).first()
+    ).filter_by(
+        email_id=email_id,
+        tenant_id=tenant_id
+    ).filter(Email.deleted_at.is_(None)).first()
     
     if not email:
-        return jsonify({"error": "Email not found"}), 404
-    
-    if email.tenant_id != tenant_id:
-        return jsonify({"error": "Forbidden"}), 403
-    
-    if email.deleted_at:
         return jsonify({"error": "Email not found"}), 404
     
     return jsonify({"email": email_to_dict(email, include_full_details=True)}), 200
@@ -372,15 +358,13 @@ def update_email(email_id):
     if not tenant_id:
         return jsonify({"error": "Unauthorized"}), 401
     
-    email = Email.query.filter_by(email_id=email_id).first()
+    # Filter out soft-deleted emails in query
+    email = Email.query.filter_by(
+        email_id=email_id,
+        tenant_id=tenant_id
+    ).filter(Email.deleted_at.is_(None)).first()
     
     if not email:
-        return jsonify({"error": "Email not found"}), 404
-    
-    if email.tenant_id != tenant_id:
-        return jsonify({"error": "Forbidden"}), 403
-    
-    if email.deleted_at:
         return jsonify({"error": "Email not found"}), 404
     
     # Cannot update sent emails
@@ -421,7 +405,7 @@ def update_email(email_id):
 @jwt_required()
 def delete_email(email_id):
     """
-    Soft delete email (sets deleted_at timestamp).
+    Hard delete email from database.
     Cannot delete if status='sent'.
     """
     claims = get_jwt()
@@ -429,23 +413,21 @@ def delete_email(email_id):
     if not tenant_id:
         return jsonify({"error": "Unauthorized"}), 401
     
-    email = Email.query.filter_by(email_id=email_id).first()
+    # Filter out soft-deleted emails in query
+    email = Email.query.filter_by(
+        email_id=email_id,
+        tenant_id=tenant_id
+    ).filter(Email.deleted_at.is_(None)).first()
     
     if not email:
-        return jsonify({"error": "Email not found"}), 404
-    
-    if email.tenant_id != tenant_id:
-        return jsonify({"error": "Forbidden"}), 403
-    
-    if email.deleted_at:
         return jsonify({"error": "Email not found"}), 404
     
     # Cannot delete sent emails
     if email.status == 'sent':
         return jsonify({"error": "Cannot delete sent email"}), 400
     
-    # Soft delete
-    email.deleted_at = datetime.utcnow()
+    # Hard delete - remove from database
+    db.session.delete(email)
     db.session.commit()
 
     return jsonify({"message": "Email deleted successfully"}), 200
@@ -465,15 +447,13 @@ def send_email(email_id):
     if not tenant_id:
         return jsonify({"error": "Unauthorized"}), 401
     
-    # Validate email exists and belongs to tenant
-    email = Email.query.filter_by(email_id=email_id).first()
+    # Validate email exists and belongs to tenant (filter out soft-deleted)
+    email = Email.query.filter_by(
+        email_id=email_id,
+        tenant_id=tenant_id
+    ).filter(Email.deleted_at.is_(None)).first()
+    
     if not email:
-        return jsonify({"error": "Email not found"}), 404
-    
-    if email.tenant_id != tenant_id:
-        return jsonify({"error": "Forbidden"}), 403
-    
-    if email.deleted_at:
         return jsonify({"error": "Email not found"}), 404
     
     # Validate email status
