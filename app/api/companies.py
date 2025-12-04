@@ -337,7 +337,22 @@ def scrape_company(company_id):
     # Import task here to avoid circular imports
     from app.tasks.scraper import scrape_company_posts
     from app.tasks.celery_app import celery_app
+    from app.models.job import Job
+    from datetime import datetime
+    import uuid
     import os
+    
+    # Create job record
+    job_id = str(uuid.uuid4())
+    job = Job(
+        job_id=job_id,
+        tenant_id=tenant_id,
+        job_type='company_scrape',
+        status='pending',
+        total_items=max_posts
+    )
+    db.session.add(job)
+    db.session.commit()
     
     # Validate Celery broker is configured before attempting to queue task
     broker_url = celery_app.conf.broker_url
@@ -345,6 +360,10 @@ def scrape_company(company_id):
         # Check if we're in production (Render sets certain env vars)
         is_production = os.getenv('FLASK_ENV') == 'production' or os.getenv('RENDER')
         if is_production:
+            job.status = 'failed'
+            job.error_message = f"Celery broker not properly configured. Broker URL: {broker_url}"
+            job.completed_at = datetime.utcnow()
+            db.session.commit()
             return jsonify({
                 "error": "Failed to start scraping job",
                 "details": f"Celery broker not properly configured. Broker URL: {broker_url}. "
@@ -361,6 +380,10 @@ def scrape_company(company_id):
             if broker is None:
                 raise ValueError("Celery broker connection is None")
         except Exception as conn_error:
+            job.status = 'failed'
+            job.error_message = f"Cannot connect to Redis broker: {str(conn_error)}"
+            job.completed_at = datetime.utcnow()
+            db.session.commit()
             return jsonify({
                 "error": "Failed to start scraping job",
                 "details": f"Cannot connect to Redis broker: {str(conn_error)}. "
@@ -369,17 +392,21 @@ def scrape_company(company_id):
                           "3) Worker service is created and running."
             }), 500
         
-        task = scrape_company_posts.delay(company_id, max_posts)
+        task = scrape_company_posts.delay(job_id, tenant_id, company_id, max_posts)
         return jsonify({
             "message": "Scraping job started",
-            "job_id": task.id,
+            "job_id": job_id,
             "company_id": company_id,
             "max_posts": max_posts,
-            "status_url": f"/api/jobs/{task.id}"  # Future endpoint for job status
+            "status_url": f"/api/jobs/{job_id}"
         }), 202
     except AttributeError as e:
         # Handle 'NoneType' object has no attribute 'Redis' error
         if 'Redis' in str(e) or 'NoneType' in str(e):
+            job.status = 'failed'
+            job.error_message = f"Redis connection error: {str(e)}"
+            job.completed_at = datetime.utcnow()
+            db.session.commit()
             return jsonify({
                 "error": "Failed to start scraping job",
                 "details": f"Redis connection error: {str(e)}. "
@@ -392,6 +419,10 @@ def scrape_company(company_id):
     except Exception as e:
         error_msg = str(e)
         # Check if it's a connection-related error
+        job.status = 'failed'
+        job.error_message = f"Failed to start job: {error_msg}"
+        job.completed_at = datetime.utcnow()
+        db.session.commit()
         if 'connection' in error_msg.lower() or 'redis' in error_msg.lower():
             return jsonify({
                 "error": "Failed to start scraping job",

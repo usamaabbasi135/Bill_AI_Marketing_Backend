@@ -35,11 +35,13 @@ INITIAL_RETRY_DELAY = 2  # seconds
 API_TIMEOUT = 60  # seconds for Apify API calls
 
 @celery_app.task(bind=True, name='scrape_company_posts')
-def scrape_company_posts(self, company_id, max_posts=100):
+def scrape_company_posts(self, job_id, tenant_id, company_id, max_posts=100):
     """
     Scrape LinkedIn company posts using Apify API.
     
     Args:
+        job_id: UUID of the job tracking this task
+        tenant_id: UUID of the tenant
         company_id: UUID of the company to scrape
         max_posts: Maximum number of posts to scrape (default: 100)
     
@@ -49,21 +51,50 @@ def scrape_company_posts(self, company_id, max_posts=100):
     app = create_app()
     
     with app.app_context():
+        job = None
         try:
+            # Get job record
+            job = Job.query.filter_by(job_id=job_id).first()
+            if not job:
+                logger.error(f"Job not found: {job_id}")
+                return {"status": "error", "message": "Job not found"}
+            
+            # Update job status to processing
+            job.status = 'processing'
+            job.updated_at = datetime.utcnow()
+            db.session.commit()
+            
+            logger.info(f"Company scraping job started: job_id={job_id}, company_id={company_id}, tenant_id={tenant_id}")
+            
             # Step 1: Get company from database
             company = Company.query.filter_by(company_id=company_id).first()
             if not company:
                 logger.error(f"Company not found: {company_id}")
+                job.status = 'failed'
+                job.error_message = "Company not found"
+                job.completed_at = datetime.utcnow()
+                job.updated_at = datetime.utcnow()
+                db.session.commit()
                 return {"status": "error", "message": "Company not found"}
             
             if not company.is_active:
                 logger.warning(f"Company is inactive: {company_id}")
+                job.status = 'failed'
+                job.error_message = "Company is inactive"
+                job.completed_at = datetime.utcnow()
+                job.updated_at = datetime.utcnow()
+                db.session.commit()
                 return {"status": "error", "message": "Company is inactive"}
             
             # Step 2: Check Apify API token
             apify_token = Config.APIFY_API_TOKEN
             if not apify_token:
                 logger.error("APIFY_API_TOKEN not configured")
+                job.status = 'failed'
+                job.error_message = "Apify API token not configured"
+                job.completed_at = datetime.utcnow()
+                job.updated_at = datetime.utcnow()
+                db.session.commit()
                 return {"status": "error", "message": "Apify API token not configured"}
             
             # Step 3: Initialize Apify client
@@ -138,6 +169,11 @@ def scrape_company_posts(self, company_id, max_posts=100):
             if not all_posts:
                 logger.warning(f"No posts found for company: {company.name}")
                 company.last_scraped_at = datetime.utcnow()
+                job.status = 'completed'
+                job.completed_items = 0
+                job.success_count = 0
+                job.completed_at = datetime.utcnow()
+                job.updated_at = datetime.utcnow()
                 db.session.commit()
                 return {
                     "status": "success",
@@ -148,6 +184,10 @@ def scrape_company_posts(self, company_id, max_posts=100):
             # Step 7: Parse and save posts to database
             posts_saved = 0
             posts_skipped = 0
+            
+            # Update job with total items
+            job.total_items = len(all_posts)
+            db.session.commit()
             
             for post_data in all_posts:
                 try:
@@ -229,6 +269,14 @@ def scrape_company_posts(self, company_id, max_posts=100):
             # Step 8: Update company last_scraped_at
             company.last_scraped_at = datetime.utcnow()
             
+            # Update job status
+            job.status = 'completed'
+            job.completed_items = posts_saved
+            job.success_count = posts_saved
+            job.failed_count = posts_skipped
+            job.completed_at = datetime.utcnow()
+            job.updated_at = datetime.utcnow()
+            
             # Commit all changes
             db.session.commit()
             
@@ -244,7 +292,14 @@ def scrape_company_posts(self, company_id, max_posts=100):
             
         except Exception as e:
             logger.error(f"Error scraping company posts: {str(e)}", exc_info=True)
-            db.session.rollback()
+            if job:
+                job.status = 'failed'
+                job.error_message = f"Scraping failed: {str(e)}"
+                job.completed_at = datetime.utcnow()
+                job.updated_at = datetime.utcnow()
+                db.session.commit()
+            else:
+                db.session.rollback()
             return {
                 "status": "error",
                 "message": f"Scraping failed: {str(e)}",
