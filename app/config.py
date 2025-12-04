@@ -34,7 +34,7 @@ class Config:
     CLAUDE_MAX_TOKENS = int(os.getenv('CLAUDE_MAX_TOKENS', '800'))
      # Apify Configuration
     APIFY_API_TOKEN = os.getenv('APIFY_API_TOKEN')
-    APIFY_ACTOR_ID = 'apimaestro/linkedin-company-posts'
+    APIFY_ACTOR_ID = 'bestscrapers/linkedin-company-post-scraper'  # Updated from apimaestro (had bug returning wrong company posts)
     
     APIFY_PROFILE_ACTOR_ID = os.getenv('APIFY_PROFILE_ACTOR_ID', 'dev_fusion/linkedin-profile-scraper')
     # AWS SES Configuration

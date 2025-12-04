@@ -69,64 +69,71 @@ def scrape_company_posts(self, company_id, max_posts=100):
             # Step 3: Initialize Apify client
             client = ApifyClient(apify_token)
             
-            # Step 4: Extract company identifier from LinkedIn URL
-            # Apify accepts company name or full URL
-            # Example: "google" or "https://www.linkedin.com/company/google/"
+            # Step 4: Prepare LinkedIn URL for BestScrapers actor
+            # BestScrapers actor requires full LinkedIn company URL
             linkedin_url = company.linkedin_url.strip()
             
-            # Extract company slug from URL if full URL provided
-            if 'linkedin.com/company/' in linkedin_url:
-                # Extract company identifier (slug)
-                parts = linkedin_url.split('linkedin.com/company/')
-                if len(parts) > 1:
-                    company_identifier = parts[1].rstrip('/').split('/')[0]
-                else:
-                    company_identifier = linkedin_url
-            else:
-                company_identifier = linkedin_url
+            logger.info(f"Starting scrape for company: {company.name}")
+            logger.info(f"LinkedIn URL: {linkedin_url}")
             
-            logger.info(f"Starting scrape for company: {company.name} ({company_identifier})")
-            
-            # Step 5: Calculate pages needed based on max_posts
-            # Apify returns up to 100 posts per page
-            posts_per_page = 100
-            pages_needed = (max_posts + posts_per_page - 1) // posts_per_page  # Ceiling division
+            # Step 5: BestScrapers returns up to 50 posts per call
+            # Note: BestScrapers doesn't support pagination, so we make one call and limit results
+            posts_per_call = 50
             
             all_posts = []
             
-            # Step 6: Call Apify Actor for each page
-            for page_num in range(1, pages_needed + 1):
-                try:
-                    # Prepare input for Apify Actor
-                    run_input = {
-                        "companyIdentifier": company_identifier,
-                        "pageNumber": page_num
-                    }
+            # Step 6: Call Apify Actor (BestScrapers doesn't support pagination, so we make one call)
+            try:
+                # Prepare input for BestScrapers actor
+                run_input = {
+                    "linkedin_url": linkedin_url
+                }
+                
+                logger.info(f"Calling Apify Actor: {Config.APIFY_ACTOR_ID}")
+                logger.info(f"Apify Input: {json.dumps(run_input, indent=2)}")
+                
+                # Run the Actor
+                run = client.actor(Config.APIFY_ACTOR_ID).call(run_input=run_input)
+                
+                logger.info(f"Apify Run ID: {run.get('id')}")
+                logger.info(f"Apify Run Status: {run.get('status')}")
+                
+                # Get results
+                dataset_items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+                
+                logger.info(f"Received {len(dataset_items)} dataset items")
+                
+                # Extract posts from data array (BestScrapers returns posts in 'data' field)
+                for item in dataset_items:
+                    if 'data' in item and isinstance(item['data'], list):
+                        all_posts.extend(item['data'])
+                        logger.info(f"Extracted {len(item['data'])} posts from data array")
+                
+                logger.info(f"Total posts extracted: {len(all_posts)}")
+                
+                # Limit to max_posts
+                if len(all_posts) > max_posts:
+                    all_posts = all_posts[:max_posts]
+                    logger.info(f"Limited to {max_posts} posts as requested")
+                
+                # Verify company match from first post
+                if all_posts:
+                    first_post = all_posts[0]
+                    poster = first_post.get('poster', {})
+                    actual_company = poster.get('name', '').lower()
+                    expected_company = company.name.lower()
                     
-                    logger.info(f"Calling Apify Actor (page {page_num}/{pages_needed})")
+                    logger.info(f"First post company: {poster.get('name', 'Unknown')}")
                     
-                    # Run the Actor
-                    run = client.actor(Config.APIFY_ACTOR_ID).call(run_input=run_input)
-                    
-                    # Get results
-                    dataset_items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
-                    
-                    logger.info(f"Received {len(dataset_items)} posts from page {page_num}")
-                    
-                    # Add posts to collection
-                    all_posts.extend(dataset_items)
-                    
-                    # Stop if we have enough posts
-                    if len(all_posts) >= max_posts:
-                        all_posts = all_posts[:max_posts]
-                        break
+                    if actual_company != expected_company:
+                        logger.warning(f"⚠️ Company name mismatch: expected '{company.name}', got '{poster.get('name', 'Unknown')}'")
+                        logger.warning(f"   This may indicate the actor returned wrong company's posts")
+                    else:
+                        logger.info(f"✓ Company match verified: {poster.get('name')}")
                         
-                except Exception as e:
-                    logger.error(f"Error calling Apify API (page {page_num}): {str(e)}")
-                    # Continue with next page or break if first page fails
-                    if page_num == 1:
-                        raise
-                    break
+            except Exception as e:
+                logger.error(f"Error calling Apify API: {str(e)}", exc_info=True)
+                raise
             
             if not all_posts:
                 logger.warning(f"No posts found for company: {company.name}")
@@ -144,12 +151,24 @@ def scrape_company_posts(self, company_id, max_posts=100):
             
             for post_data in all_posts:
                 try:
-                    # Extract post URL (required field) - Apify uses 'post_url' (underscore)
-                    post_url = post_data.get('post_url') or post_data.get('postUrl') or post_data.get('url')
+                    # Extract post URL (required field) - BestScrapers uses 'url'
+                    post_url = post_data.get('url') or post_data.get('post_url') or post_data.get('postUrl')
                     if not post_url:
                         logger.warning(f"Post missing URL, skipping. Keys: {list(post_data.keys())}")
                         posts_skipped += 1
                         continue
+                    
+                    # Verify company match using poster.name
+                    poster = post_data.get('poster', {})
+                    actual_company = poster.get('name', '').lower()
+                    expected_company = company.name.lower()
+                    
+                    # Allow partial match (e.g., "Microsoft (Updated)" should match "Microsoft")
+                    if actual_company and expected_company:
+                        if actual_company not in expected_company and expected_company not in actual_company:
+                            logger.warning(f"Skipping post from different company: expected '{company.name}', got '{poster.get('name', 'Unknown')}'")
+                            posts_skipped += 1
+                            continue
                     
                     # Check if post already exists (by source_url)
                     existing_post = Post.query.filter_by(
@@ -161,38 +180,26 @@ def scrape_company_posts(self, company_id, max_posts=100):
                     if existing_post:
                         # Update existing post
                         existing_post.post_text = post_data.get('text') or post_data.get('content') or existing_post.post_text
-                        # Parse date from posted_at dict structure
-                        posted_at = post_data.get('posted_at') or post_data.get('postedAt')
-                        if posted_at:
+                        # Parse date from BestScrapers format: "2025-12-01 20:00:21"
+                        posted = post_data.get('posted')
+                        if posted:
                             try:
-                                if isinstance(posted_at, dict) and 'date' in posted_at:
-                                    # Apify returns: {'date': '2025-11-13 18:58:46', ...}
-                                    date_str = posted_at['date']
-                                    existing_post.post_date = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S').date()
-                                elif isinstance(posted_at, str):
-                                    existing_post.post_date = datetime.fromisoformat(
-                                        posted_at.replace('Z', '+00:00')
-                                    ).date()
+                                # BestScrapers format: "2025-12-01 20:00:21"
+                                existing_post.post_date = datetime.strptime(posted, '%Y-%m-%d %H:%M:%S').date()
                             except Exception as e:
                                 logger.debug(f"Could not parse date: {e}")
                         posts_saved += 1
                         continue
                     
-                    # Parse post date - handle Apify's posted_at dict structure
+                    # Parse post date - BestScrapers format: "2025-12-01 20:00:21"
                     post_date = None
-                    posted_at = post_data.get('posted_at') or post_data.get('postedAt')
-                    if posted_at:
+                    posted = post_data.get('posted')
+                    if posted:
                         try:
-                            if isinstance(posted_at, dict) and 'date' in posted_at:
-                                # Apify returns: {'date': '2025-11-13 18:58:46', 'timestamp': ..., ...}
-                                date_str = posted_at['date']
-                                post_date = datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S').date()
-                            elif isinstance(posted_at, str):
-                                post_date = datetime.fromisoformat(
-                                    posted_at.replace('Z', '+00:00')
-                                ).date()
+                            # BestScrapers returns: "2025-12-01 20:00:21"
+                            post_date = datetime.strptime(posted, '%Y-%m-%d %H:%M:%S').date()
                         except Exception as e:
-                            logger.debug(f"Could not parse date: {e}")
+                            logger.debug(f"Could not parse date '{posted}': {e}")
                     
                     # Extract post text/content
                     post_text = post_data.get('text') or post_data.get('content') or ''
