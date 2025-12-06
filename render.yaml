@@ -2,11 +2,13 @@ services:
   - type: web
     name: billy-ai-backend
     env: python
-    buildCommand: "pip install -r requirements.txt && flask db upgrade"
-    startCommand: "gunicorn --bind 0.0.0.0:$PORT wsgi:app" 
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "chmod +x start.sh && ./start.sh"
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: FLASK_APP
+        value: wsgi.py
       - key: DATABASE_URL
         fromDatabase:
           name: billy-ai-db
