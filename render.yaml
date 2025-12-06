@@ -11,6 +11,7 @@ services:
         fromDatabase:
           name: billy-ai-db
           property: connectionString
+      # Redis must be created manually first, then these will auto-link
       - key: REDIS_URL
         fromService:
           type: redis
@@ -51,6 +52,7 @@ services:
         fromDatabase:
           name: billy-ai-db
           property: connectionString
+      # Redis must be created manually first, then these will auto-link
       - key: REDIS_URL
         fromService:
           type: redis
@@ -84,6 +86,6 @@ databases:
     databaseName: billy_ai
     user: billy_admin
 
-redis:
-  - name: billy-ai-redis
-    plan: free  # or 'starter' for production
+# Note: Redis services cannot be created via Blueprint YAML
+# You need to manually create a Redis service named "billy-ai-redis" in Render dashboard
+# Then link it to the services via environment variables
