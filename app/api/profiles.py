@@ -699,3 +699,199 @@ def scrape_single_profile(profile_id):
             "error": "Failed to start scraping job",
             "details": str(e)
         }), 500
+
+
+@bp.route('/bulk', methods=['DELETE'])
+@jwt_required()
+def bulk_delete_profiles():
+    """
+    Bulk delete multiple profiles.
+    
+    Request body:
+        {
+            "ids": ["uuid1", "uuid2", ...]
+        }
+    
+    Returns:
+        - 200 OK: All profiles deleted successfully
+        - 207 Multi-Status: Partial success (some deleted, some failed)
+        - 400 Bad Request: Invalid input or all deletions failed
+    
+    Validation:
+        - Maximum 100 items per request
+        - All IDs must belong to the requesting tenant
+        - Cannot delete profiles linked to campaigns
+        - Cannot delete profiles with sent emails
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        current_app.logger.warning("Bulk delete profiles: Missing tenant_id in JWT token")
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_app.logger.debug(f"Bulk delete profiles: Request for tenant_id={tenant_id}")
+    
+    # Parse request body
+    data = request.get_json() or {}
+    profile_ids = data.get('ids', [])
+    
+    # Validate input
+    if not isinstance(profile_ids, list):
+        current_app.logger.warning(f"Bulk delete profiles: Invalid input type, expected list, got {type(profile_ids)}")
+        return jsonify({"error": "ids must be an array"}), 400
+    
+    if len(profile_ids) == 0:
+        current_app.logger.warning("Bulk delete profiles: Empty ids array")
+        return jsonify({"error": "ids array cannot be empty"}), 400
+    
+    if len(profile_ids) > 100:
+        current_app.logger.warning(f"Bulk delete profiles: Too many items, got {len(profile_ids)}, max 100")
+        return jsonify({"error": "Cannot delete more than 100 profiles at once"}), 400
+    
+    current_app.logger.debug(f"Bulk delete profiles: Processing {len(profile_ids)} profile IDs")
+    
+    # Import models here to avoid circular imports
+    from app.models.campaign import CampaignProfile
+    from app.models.email import Email
+    
+    # Track results
+    successful = []
+    failed = []
+    
+    try:
+        # Fetch all profiles that belong to the tenant
+        profiles = Profile.query.filter(
+            Profile.profile_id.in_(profile_ids),
+            Profile.tenant_id == tenant_id
+        ).all()
+        
+        found_profile_ids = {profile.profile_id for profile in profiles}
+        missing_ids = set(profile_ids) - found_profile_ids
+        
+        # Add missing IDs to failed list
+        for missing_id in missing_ids:
+            failed.append({
+                "id": missing_id,
+                "reason": "Profile not found or does not belong to tenant"
+            })
+            current_app.logger.debug(f"Bulk delete profiles: Profile {missing_id} not found or access denied")
+        
+        # Check each profile for validation rules
+        for profile in profiles:
+            profile_id = profile.profile_id
+            current_app.logger.debug(f"Bulk delete profiles: Validating profile_id={profile_id}")
+            
+            # Check if profile is linked to campaigns (prevent deletion if linked)
+            campaign_links = CampaignProfile.query.filter_by(profile_id=profile_id).all()
+            if campaign_links:
+                # Check if any linked campaigns have sent emails
+                email_ids = [link.email_id for link in campaign_links if link.email_id]
+                if email_ids:
+                    sent_emails_count = Email.query.filter(
+                        Email.email_id.in_(email_ids),
+                        Email.status == 'sent'
+                    ).count()
+                    
+                    if sent_emails_count > 0:
+                        failed.append({
+                            "id": profile_id,
+                            "reason": "Profile is linked to campaigns with sent emails"
+                        })
+                        current_app.logger.debug(f"Bulk delete profiles: Profile {profile_id} has {sent_emails_count} sent emails in campaigns")
+                        continue
+                
+                # Profile is linked to campaigns (even without sent emails) - prevent deletion
+                failed.append({
+                    "id": profile_id,
+                    "reason": "Profile is linked to campaigns"
+                })
+                current_app.logger.debug(f"Bulk delete profiles: Profile {profile_id} is linked to campaigns")
+                continue
+            
+            # Check for direct sent emails (not through campaigns)
+            direct_sent_emails = Email.query.filter_by(
+                profile_id=profile_id,
+                status='sent'
+            ).first()
+            
+            if direct_sent_emails:
+                failed.append({
+                    "id": profile_id,
+                    "reason": "Profile has sent emails"
+                })
+                current_app.logger.debug(f"Bulk delete profiles: Profile {profile_id} has direct sent emails")
+                continue
+            
+            # Profile is safe to delete
+            try:
+                db.session.delete(profile)
+                successful.append({
+                    "id": profile_id
+                })
+                current_app.logger.debug(f"Bulk delete profiles: Profile {profile_id} marked for deletion")
+            except Exception as delete_error:
+                current_app.logger.error(f"Bulk delete profiles: Error deleting profile {profile_id}: {str(delete_error)}")
+                failed.append({
+                    "id": profile_id,
+                    "reason": f"Database error: {str(delete_error)}"
+                })
+        
+        # Commit all deletions
+        if successful:
+            try:
+                db.session.commit()
+                current_app.logger.info(f"Bulk delete profiles: Successfully deleted {len(successful)} profiles")
+            except Exception as commit_error:
+                current_app.logger.error(f"Bulk delete profiles: Error committing deletions: {str(commit_error)}")
+                db.session.rollback()
+                # Mark all successful as failed due to commit error
+                for item in successful:
+                    failed.append({
+                        "id": item["id"],
+                        "reason": f"Commit error: {str(commit_error)}"
+                    })
+                successful = []
+        
+        # Determine response status
+        if len(failed) == 0:
+            # All succeeded
+            current_app.logger.info(f"Bulk delete profiles: All {len(successful)} profiles deleted successfully")
+            return jsonify({
+                "message": "All profiles deleted successfully",
+                "deleted_count": len(successful),
+                "results": {
+                    "successful": successful,
+                    "failed": []
+                }
+            }), 200
+        elif len(successful) == 0:
+            # All failed
+            current_app.logger.warning(f"Bulk delete profiles: All {len(failed)} profiles failed to delete")
+            return jsonify({
+                "error": "All deletions failed",
+                "deleted_count": 0,
+                "results": {
+                    "successful": [],
+                    "failed": failed
+                }
+            }), 400
+        else:
+            # Partial success
+            current_app.logger.info(f"Bulk delete profiles: Partial success - {len(successful)} deleted, {len(failed)} failed")
+            return jsonify({
+                "message": "Partial success",
+                "deleted_count": len(successful),
+                "failed_count": len(failed),
+                "results": {
+                    "successful": successful,
+                    "failed": failed
+                }
+            }), 207  # Multi-Status
+            
+    except Exception as e:
+        current_app.logger.exception(f"Bulk delete profiles: Unexpected error: {str(e)}")
+        db.session.rollback()
+        return jsonify({
+            "error": "Internal server error",
+            "details": str(e)
+        }), 500
