@@ -359,3 +359,208 @@ def analyze_batch_posts():
                 "error": "Failed to start analysis jobs",
                 "details": error_msg
             }), 500
+
+
+@bp.route('/bulk', methods=['DELETE'])
+@jwt_required()
+def bulk_delete_posts():
+    """
+    Bulk delete multiple posts.
+    
+    Request body:
+        {
+            "ids": ["uuid1", "uuid2", ...]
+        }
+    
+    Returns:
+        - 200 OK: All posts deleted successfully
+        - 207 Multi-Status: Partial success (some deleted, some failed)
+        - 400 Bad Request: Invalid input or all deletions failed
+    
+    Validation:
+        - Maximum 100 items per request
+        - All IDs must belong to the requesting tenant
+        - Cannot delete posts linked to campaigns
+        - Cannot delete posts with sent emails
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        current_app.logger.warning("Bulk delete posts: Missing tenant_id in JWT token")
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_app.logger.debug(f"Bulk delete posts: Request for tenant_id={tenant_id}")
+    
+    # Parse request body
+    data = request.get_json() or {}
+    post_ids = data.get('ids', [])
+    
+    # Validate input
+    if not isinstance(post_ids, list):
+        current_app.logger.warning(f"Bulk delete posts: Invalid input type, expected list, got {type(post_ids)}")
+        return jsonify({"error": "ids must be an array"}), 400
+    
+    if len(post_ids) == 0:
+        current_app.logger.warning("Bulk delete posts: Empty ids array")
+        return jsonify({"error": "ids array cannot be empty"}), 400
+    
+    if len(post_ids) > 100:
+        current_app.logger.warning(f"Bulk delete posts: Too many items, got {len(post_ids)}, max 100")
+        return jsonify({"error": "Cannot delete more than 100 posts at once"}), 400
+    
+    current_app.logger.debug(f"Bulk delete posts: Processing {len(post_ids)} post IDs")
+    
+    # Import models here to avoid circular imports
+    from app.models.campaign import Campaign
+    from app.models.email import Email
+    
+    # Track results
+    successful = []
+    failed = []
+    
+    try:
+        # Fetch all posts that belong to the tenant
+        posts = Post.query.filter(
+            Post.post_id.in_(post_ids),
+            Post.tenant_id == tenant_id
+        ).all()
+        
+        found_post_ids = {post.post_id for post in posts}
+        missing_ids = set(post_ids) - found_post_ids
+        
+        # Add missing IDs to failed list
+        for missing_id in missing_ids:
+            failed.append({
+                "id": missing_id,
+                "reason": "Post not found or does not belong to tenant"
+            })
+            current_app.logger.debug(f"Bulk delete posts: Post {missing_id} not found or access denied")
+        
+        # Check each post for validation rules
+        for post in posts:
+            post_id = post.post_id
+            current_app.logger.debug(f"Bulk delete posts: Validating post_id={post_id}")
+            
+            # Check if post is linked to campaigns (prevent deletion if linked)
+            campaigns = Campaign.query.filter_by(post_id=post_id).all()
+            if campaigns:
+                # Check if any linked campaigns have sent emails
+                campaign_ids = [campaign.campaign_id for campaign in campaigns]
+                from app.models.campaign import CampaignProfile
+                
+                # Get all campaign profiles for these campaigns
+                campaign_profiles = CampaignProfile.query.filter(
+                    CampaignProfile.campaign_id.in_(campaign_ids)
+                ).all()
+                
+                # Check if any have sent emails
+                email_ids = [cp.email_id for cp in campaign_profiles if cp.email_id]
+                if email_ids:
+                    sent_emails_count = Email.query.filter(
+                        Email.email_id.in_(email_ids),
+                        Email.status == 'sent'
+                    ).count()
+                    
+                    if sent_emails_count > 0:
+                        failed.append({
+                            "id": post_id,
+                            "reason": "Post is linked to campaigns with sent emails"
+                        })
+                        current_app.logger.debug(f"Bulk delete posts: Post {post_id} has {sent_emails_count} sent emails in campaigns")
+                        continue
+                
+                # Post is linked to campaigns (even without sent emails) - prevent deletion
+                failed.append({
+                    "id": post_id,
+                    "reason": "Post is linked to campaigns"
+                })
+                current_app.logger.debug(f"Bulk delete posts: Post {post_id} is linked to campaigns")
+                continue
+            
+            # Check for direct sent emails (not through campaigns)
+            direct_sent_emails = Email.query.filter_by(
+                post_id=post_id,
+                status='sent'
+            ).first()
+            
+            if direct_sent_emails:
+                failed.append({
+                    "id": post_id,
+                    "reason": "Post has sent emails"
+                })
+                current_app.logger.debug(f"Bulk delete posts: Post {post_id} has direct sent emails")
+                continue
+            
+            # Post is safe to delete
+            try:
+                db.session.delete(post)
+                successful.append({
+                    "id": post_id
+                })
+                current_app.logger.debug(f"Bulk delete posts: Post {post_id} marked for deletion")
+            except Exception as delete_error:
+                current_app.logger.error(f"Bulk delete posts: Error deleting post {post_id}: {str(delete_error)}")
+                failed.append({
+                    "id": post_id,
+                    "reason": f"Database error: {str(delete_error)}"
+                })
+        
+        # Commit all deletions
+        if successful:
+            try:
+                db.session.commit()
+                current_app.logger.info(f"Bulk delete posts: Successfully deleted {len(successful)} posts")
+            except Exception as commit_error:
+                current_app.logger.error(f"Bulk delete posts: Error committing deletions: {str(commit_error)}")
+                db.session.rollback()
+                # Mark all successful as failed due to commit error
+                for item in successful:
+                    failed.append({
+                        "id": item["id"],
+                        "reason": f"Commit error: {str(commit_error)}"
+                    })
+                successful = []
+        
+        # Determine response status
+        if len(failed) == 0:
+            # All succeeded
+            current_app.logger.info(f"Bulk delete posts: All {len(successful)} posts deleted successfully")
+            return jsonify({
+                "message": "All posts deleted successfully",
+                "deleted_count": len(successful),
+                "results": {
+                    "successful": successful,
+                    "failed": []
+                }
+            }), 200
+        elif len(successful) == 0:
+            # All failed
+            current_app.logger.warning(f"Bulk delete posts: All {len(failed)} posts failed to delete")
+            return jsonify({
+                "error": "All deletions failed",
+                "deleted_count": 0,
+                "results": {
+                    "successful": [],
+                    "failed": failed
+                }
+            }), 400
+        else:
+            # Partial success
+            current_app.logger.info(f"Bulk delete posts: Partial success - {len(successful)} deleted, {len(failed)} failed")
+            return jsonify({
+                "message": "Partial success",
+                "deleted_count": len(successful),
+                "failed_count": len(failed),
+                "results": {
+                    "successful": successful,
+                    "failed": failed
+                }
+            }), 207  # Multi-Status
+            
+    except Exception as e:
+        current_app.logger.exception(f"Bulk delete posts: Unexpected error: {str(e)}")
+        db.session.rollback()
+        return jsonify({
+            "error": "Internal server error",
+            "details": str(e)
+        }), 500
