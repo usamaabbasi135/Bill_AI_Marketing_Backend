@@ -7,6 +7,8 @@ from marshmallow import Schema, fields, validates, ValidationError
 from app.extensions import db
 from app.models.post import Post
 from app.models.company import Company
+from app.models.campaign import Campaign
+from app.models.email import Email
 from datetime import datetime
 from sqlalchemy import and_, or_
 
@@ -359,3 +361,121 @@ def analyze_batch_posts():
                 "error": "Failed to start analysis jobs",
                 "details": error_msg
             }), 500
+
+
+@bp.route('/<post_id>', methods=['DELETE'])
+@jwt_required()
+def delete_post(post_id):
+    """
+    Delete a post by ID.
+    
+    Requirements:
+    - Post must exist and belong to the requesting tenant
+    - Post must not be linked to any campaigns
+    - Post must not have any sent emails (status='sent')
+    - Draft emails will be deleted via CASCADE
+    
+    Returns:
+    - 200: Post deleted successfully
+    - 400: Post is linked to campaigns or has sent emails
+    - 403: Post belongs to different tenant
+    - 404: Post not found
+    - 500: Database error
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    
+    if not tenant_id:
+        current_app.logger.warning("Delete post: Missing tenant_id in JWT token")
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_app.logger.debug(f"Delete post: Request for post_id={post_id}, tenant_id={tenant_id}")
+    
+    try:
+        # Verify post exists
+        post = Post.query.filter_by(post_id=post_id).first()
+        
+        if not post:
+            current_app.logger.warning(f"Delete post: Post not found post_id={post_id}, tenant_id={tenant_id}")
+            return jsonify({"error": "Post not found"}), 404
+        
+        # Verify post belongs to requesting tenant
+        if post.tenant_id != tenant_id:
+            current_app.logger.warning(
+                f"Delete post: Forbidden - post belongs to different tenant. "
+                f"post_id={post_id}, post_tenant_id={post.tenant_id}, requesting_tenant_id={tenant_id}"
+            )
+            return jsonify({"error": "Forbidden"}), 403
+        
+        current_app.logger.debug(
+            f"Delete post: Post found post_id={post_id}, "
+            f"company_id={post.company_id}, tenant_id={tenant_id}"
+        )
+        
+        # Check if post is linked to any campaigns
+        linked_campaigns = Campaign.query.filter_by(post_id=post_id).all()
+        
+        if linked_campaigns:
+            campaign_ids = [campaign.campaign_id for campaign in linked_campaigns]
+            current_app.logger.warning(
+                f"Delete post: Cannot delete - post is linked to campaigns. "
+                f"post_id={post_id}, campaign_ids={campaign_ids}, tenant_id={tenant_id}"
+            )
+            return jsonify({
+                "error": "Cannot delete post: post is linked to active campaigns. Delete campaigns first."
+            }), 400
+        
+        current_app.logger.debug(f"Delete post: No campaign links found for post_id={post_id}")
+        
+        # Check if post has any sent emails (status='sent')
+        sent_emails = Email.query.filter_by(
+            post_id=post_id,
+            status='sent'
+        ).count()
+        
+        if sent_emails > 0:
+            current_app.logger.warning(
+                f"Delete post: Cannot delete - post has sent emails. "
+                f"post_id={post_id}, sent_emails_count={sent_emails}, tenant_id={tenant_id}"
+            )
+            return jsonify({
+                "error": "Cannot delete post: post has sent emails associated with it"
+            }), 400
+        
+        # Check for draft emails (for logging purposes)
+        draft_emails = Email.query.filter_by(
+            post_id=post_id,
+            status='draft'
+        ).count()
+        
+        if draft_emails > 0:
+            current_app.logger.debug(
+                f"Delete post: Found {draft_emails} draft email(s) linked to post_id={post_id}. "
+                f"These will be deleted via CASCADE"
+            )
+        
+        # Delete the post (Campaigns and Emails will be CASCADE deleted automatically)
+        post_source_url = post.source_url
+        post_company_id = post.company_id
+        
+        db.session.delete(post)
+        db.session.commit()
+        
+        current_app.logger.info(
+            f"Delete post: Successfully deleted post. "
+            f"post_id={post_id}, company_id={post_company_id}, "
+            f"source_url={post_source_url[:100] if post_source_url else 'N/A'}..., "
+            f"tenant_id={tenant_id}, draft_emails_deleted={draft_emails}"
+        )
+        
+        return jsonify({"message": "Post deleted successfully"}), 200
+        
+    except Exception as e:
+        current_app.logger.exception(
+            f"Delete post: Error deleting post_id={post_id}, tenant_id={tenant_id}: {str(e)}"
+        )
+        db.session.rollback()
+        return jsonify({
+            "error": "Failed to delete post",
+            "details": str(e)
+        }), 500
