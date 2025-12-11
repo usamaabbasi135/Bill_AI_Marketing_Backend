@@ -731,6 +731,24 @@
             },
             "description": "Scrape a single profile by ID. Returns job_id immediately (async task). Use job_id to check status via GET /api/jobs/{job_id}."
           }
+        },
+        {
+          "name": "Delete Profile",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles/{{profile_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles", "{{profile_id}}"]
+            },
+            "description": "Delete a profile by ID. Requirements: Profile must exist and belong to the requesting tenant. Profile must not be linked to any active campaigns. Email records will have their profile_id set to NULL if possible. Returns 200 on success, 400 if profile is linked to active campaigns, 403 if profile belongs to different tenant, 404 if profile not found."
+          }
         }
       ]
     },
@@ -1445,6 +1463,24 @@
               "path": ["api", "posts", "analyze-batch"]
             },
             "description": "Analyze multiple posts in batch. Maximum 100 posts per batch. Returns job_ids for tracking."
+          }
+        },
+        {
+          "name": "Delete Post",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/{{post_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "posts", "{{post_id}}"]
+            },
+            "description": "Delete a post by ID. Requirements: Post must exist and belong to the requesting tenant. Post must not be linked to any campaigns. Post must not have any sent emails (status='sent'). Draft emails will be deleted via CASCADE. Returns 200 on success, 400 if post is linked to campaigns or has sent emails, 403 if post belongs to different tenant, 404 if post not found."
           }
         }
       ]
