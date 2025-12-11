@@ -442,19 +442,25 @@ def delete_post(post_id):
                 "error": "Cannot delete post: post has sent emails associated with it"
             }), 400
         
-        # Check for draft emails (for logging purposes)
+        # Check for draft emails and delete them explicitly before deleting the post
+        # This prevents SQLAlchemy from trying to set post_id to NULL (which violates NOT NULL constraint)
         draft_emails = Email.query.filter_by(
             post_id=post_id,
             status='draft'
-        ).count()
+        ).all()
         
-        if draft_emails > 0:
+        draft_emails_count = len(draft_emails)
+        
+        if draft_emails_count > 0:
             current_app.logger.debug(
-                f"Delete post: Found {draft_emails} draft email(s) linked to post_id={post_id}. "
-                f"These will be deleted via CASCADE"
+                f"Delete post: Found {draft_emails_count} draft email(s) linked to post_id={post_id}. "
+                f"Deleting them explicitly before deleting the post"
             )
+            # Explicitly delete draft emails to avoid foreign key constraint issues
+            for email in draft_emails:
+                db.session.delete(email)
         
-        # Delete the post (Campaigns and Emails will be CASCADE deleted automatically)
+        # Delete the post (Campaigns will be CASCADE deleted automatically)
         post_source_url = post.source_url
         post_company_id = post.company_id
         
@@ -465,7 +471,7 @@ def delete_post(post_id):
             f"Delete post: Successfully deleted post. "
             f"post_id={post_id}, company_id={post_company_id}, "
             f"source_url={post_source_url[:100] if post_source_url else 'N/A'}..., "
-            f"tenant_id={tenant_id}, draft_emails_deleted={draft_emails}"
+            f"tenant_id={tenant_id}, draft_emails_deleted={draft_emails_count}"
         )
         
         return jsonify({"message": "Post deleted successfully"}), 200
