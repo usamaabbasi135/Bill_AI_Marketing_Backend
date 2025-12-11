@@ -731,6 +731,32 @@
             },
             "description": "Scrape a single profile by ID. Returns job_id immediately (async task). Use job_id to check status via GET /api/jobs/{job_id}."
           }
+        },
+        {
+          "name": "Bulk Delete Profiles",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\"{{profile_id}}\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles/bulk",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles", "bulk"]
+            },
+            "description": "Bulk delete multiple profiles. Request body: {\"ids\": [\"uuid1\", \"uuid2\", ...]}. Maximum 100 profiles per request. Returns 200 if all succeed, 207 (Multi-Status) if partial success, 400 if all fail. Validation: All IDs must belong to tenant, cannot delete profiles linked to campaigns, cannot delete profiles with sent emails. Response includes deleted_count and results with successful/failed arrays."
+          }
         }
       ]
     },
@@ -1445,6 +1471,32 @@
               "path": ["api", "posts", "analyze-batch"]
             },
             "description": "Analyze multiple posts in batch. Maximum 100 posts per batch. Returns job_ids for tracking."
+          }
+        },
+        {
+          "name": "Bulk Delete Posts",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ids\": [\"{{post_id}}\"]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/bulk",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "posts", "bulk"]
+            },
+            "description": "Bulk delete multiple posts. Request body: {\"ids\": [\"uuid1\", \"uuid2\", ...]}. Maximum 100 posts per request. Returns 200 if all succeed, 207 (Multi-Status) if partial success, 400 if all fail. Validation: All IDs must belong to tenant, cannot delete posts linked to campaigns, cannot delete posts with sent emails. Response includes deleted_count and results with successful/failed arrays."
           }
         }
       ]
