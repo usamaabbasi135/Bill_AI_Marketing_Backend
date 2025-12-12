@@ -7,6 +7,7 @@ import logging
 import requests
 import base64
 import json
+import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
 from urllib.parse import urlencode, parse_qs, urlparse
@@ -93,10 +94,27 @@ class OAuthService:
             'redirect_uri': Config.MICROSOFT_REDIRECT_URI,
             'response_mode': 'query',
             'scope': Config.MICROSOFT_SCOPES,
-            'state': state
+            'state': state,
+            'prompt': 'select_account'  # Force account selection
         }
         
-        auth_url = f"https://login.microsoftonline.com/common/oauth2/v2.0/authorize?{urlencode(params)}"
+        # Determine which endpoint to use based on configuration
+        # Check if a specific endpoint is configured, otherwise use /consumers as default
+        # /common requires 'All' audience, /consumers works with 'Consumer' audience
+        microsoft_endpoint = os.getenv('MICROSOFT_ENDPOINT', 'consumers').lower()
+        
+        if microsoft_endpoint == 'common':
+            # Use /common for both personal and work accounts (requires 'All' audience in Azure)
+            endpoint = 'common'
+        elif microsoft_endpoint == 'organizations':
+            # Use /organizations for work/school accounts only
+            endpoint = 'organizations'
+        else:
+            # Default to /consumers for personal accounts only (works with 'Consumer' audience)
+            endpoint = 'consumers'
+        
+        auth_url = f"https://login.microsoftonline.com/{endpoint}/oauth2/v2.0/authorize?{urlencode(params)}"
+        logger.info(f"Using Microsoft endpoint: /{endpoint} (configured: {microsoft_endpoint})")
         logger.info(f"Generated Microsoft OAuth URL for user_id={user_id}")
         return auth_url, state
     
@@ -146,8 +164,18 @@ class OAuthService:
         if not Config.MICROSOFT_CLIENT_ID or not Config.MICROSOFT_CLIENT_SECRET:
             raise ValueError("Microsoft OAuth not configured")
         
+        # Determine token endpoint based on configuration
+        # Must match the endpoint used in authorization URL
+        microsoft_endpoint = os.getenv('MICROSOFT_ENDPOINT', 'consumers').lower()
+        if microsoft_endpoint == 'common':
+            endpoint = 'common'
+        elif microsoft_endpoint == 'organizations':
+            endpoint = 'organizations'
+        else:
+            endpoint = 'consumers'
+        
         # Exchange code for tokens
-        token_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+        token_url = f"https://login.microsoftonline.com/{endpoint}/oauth2/v2.0/token"
         token_data = {
             'client_id': Config.MICROSOFT_CLIENT_ID,
             'client_secret': Config.MICROSOFT_CLIENT_SECRET,
@@ -370,9 +398,26 @@ class OAuthService:
     def _get_microsoft_user_info(access_token: str) -> Dict[str, Any]:
         """Get user info from Microsoft Graph API."""
         headers = {'Authorization': f'Bearer {access_token}'}
-        response = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers, timeout=10)
-        response.raise_for_status()
-        return response.json()
+        try:
+            response = requests.get('https://graph.microsoft.com/v1.0/me', headers=headers, timeout=10)
+            response.raise_for_status()
+            return response.json()
+        except requests.HTTPError as e:
+            if e.response.status_code == 401:
+                error_data = {}
+                try:
+                    error_data = e.response.json()
+                except:
+                    error_data = {'error': e.response.text}
+                
+                logger.error(f"401 Unauthorized when getting user info: {error_data}")
+                logger.error("Make sure 'User.Read' scope is included in MICROSOFT_SCOPES")
+                logger.error("And that the permission is granted in Azure Portal")
+                raise ValueError(
+                    "Failed to retrieve user email: Access token doesn't have permission to read user info. "
+                    "Please ensure 'User.Read' scope is included and permission is granted in Azure Portal."
+                ) from e
+            raise
     
     @staticmethod
     def _get_google_user_info(access_token: str) -> Dict[str, Any]:
@@ -433,7 +478,17 @@ class OAuthService:
             logger.error(f"Failed to decrypt refresh token: {str(e)}")
             return False
         
-        token_url = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+        # Determine token endpoint based on configuration
+        # Must match the endpoint used in authorization URL
+        microsoft_endpoint = os.getenv('MICROSOFT_ENDPOINT', 'consumers').lower()
+        if microsoft_endpoint == 'common':
+            endpoint = 'common'
+        elif microsoft_endpoint == 'organizations':
+            endpoint = 'organizations'
+        else:
+            endpoint = 'consumers'
+        
+        token_url = f"https://login.microsoftonline.com/{endpoint}/oauth2/v2.0/token"
         token_data = {
             'client_id': Config.MICROSOFT_CLIENT_ID,
             'client_secret': Config.MICROSOFT_CLIENT_SECRET,

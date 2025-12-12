@@ -47,7 +47,7 @@ class Config:
     MICROSOFT_CLIENT_ID = os.getenv('MICROSOFT_CLIENT_ID')
     MICROSOFT_CLIENT_SECRET = os.getenv('MICROSOFT_CLIENT_SECRET')
     MICROSOFT_REDIRECT_URI = os.getenv('MICROSOFT_REDIRECT_URI', 'http://localhost:5000/api/auth/oauth/microsoft/callback')
-    MICROSOFT_SCOPES = 'https://graph.microsoft.com/Mail.Send offline_access'
+    MICROSOFT_SCOPES = 'https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read offline_access'
     
     # Google OAuth Configuration
     GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID')

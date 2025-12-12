@@ -58,8 +58,67 @@ def microsoft_callback():
         error_description: Error description
     
     Returns:
-        Redirect to frontend with success/error status
+        HTML page with success/error status (or redirect if redirect_uri provided)
     """
+    from flask import render_template_string
+    
+    # Success HTML template
+    success_html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>OAuth Success</title>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
+            .container { background: white; padding: 30px; border-radius: 10px; max-width: 500px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .success { color: #4CAF50; font-size: 24px; margin-bottom: 20px; }
+            .info { color: #666; margin: 10px 0; }
+            .close { margin-top: 20px; color: #999; font-size: 14px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="success">✅ Success!</div>
+            <h2>Microsoft Account Connected</h2>
+            <div class="info">Email: {{ email }}</div>
+            <div class="info">Provider ID: {{ provider_id }}</div>
+            <p class="close">You can close this window now.</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    # Error HTML template
+    error_html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>OAuth Error</title>
+        <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f5f5f5; }
+            .container { background: white; padding: 30px; border-radius: 10px; max-width: 500px; margin: 0 auto; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            .error { color: #f44336; font-size: 24px; margin-bottom: 20px; }
+            .info { color: #666; margin: 10px 0; }
+            .details { background: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0; text-align: left; font-size: 12px; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="error">❌ Error</div>
+            <h2>OAuth Connection Failed</h2>
+            <div class="info">{{ error }}</div>
+            {% if error_description %}
+            <div class="details">
+                <strong>Details:</strong><br>
+                {{ error_description }}
+            </div>
+            {% endif %}
+            <p>Please try again or contact support.</p>
+        </div>
+    </body>
+    </html>
+    """
+    
     error = request.args.get('error')
     error_description = request.args.get('error_description')
     code = request.args.get('code')
@@ -67,35 +126,66 @@ def microsoft_callback():
     
     if error:
         current_app.logger.warning(f"Microsoft OAuth callback error: {error} - {error_description}")
-        # Redirect to frontend with error
-        # In production, replace with your frontend URL
-        frontend_url = request.args.get('redirect_uri', 'http://localhost:3000/oauth/callback')
-        return redirect(f"{frontend_url}?error={error}&error_description={error_description}&provider=microsoft")
+        error_msg = error_description or error
+        
+        # Check if redirect_uri is provided
+        frontend_url = request.args.get('redirect_uri')
+        if frontend_url:
+            return redirect(f"{frontend_url}?error={error}&error_description={error_description}&provider=microsoft")
+        
+        return render_template_string(error_html, error=error_msg, error_description=error_description)
     
     if not code or not state:
         current_app.logger.warning("Microsoft OAuth callback: Missing code or state")
-        frontend_url = request.args.get('redirect_uri', 'http://localhost:3000/oauth/callback')
-        return redirect(f"{frontend_url}?error=missing_code_or_state&provider=microsoft")
+        error_msg = "Missing authorization code or state parameter"
+        
+        frontend_url = request.args.get('redirect_uri')
+        if frontend_url:
+            return redirect(f"{frontend_url}?error=missing_code_or_state&provider=microsoft")
+        
+        return render_template_string(error_html, error=error_msg)
     
     try:
         result = OAuthService.handle_microsoft_callback(code, state)
-        current_app.logger.info(f"Microsoft OAuth callback success: provider_id={result['provider_id']}")
+        current_app.logger.info(f"Microsoft OAuth callback success: provider_id={result['provider_id']}, email={result['email']}")
         
-        # Redirect to frontend with success
-        frontend_url = request.args.get('redirect_uri', 'http://localhost:3000/oauth/callback')
-        return redirect(
-            f"{frontend_url}?success=true&provider=microsoft&email={result['email']}&provider_id={result['provider_id']}"
+        # Check if redirect_uri is provided
+        frontend_url = request.args.get('redirect_uri')
+        if frontend_url:
+            return redirect(
+                f"{frontend_url}?success=true&provider=microsoft&email={result['email']}&provider_id={result['provider_id']}"
+            )
+        
+        # Otherwise show success page
+        return render_template_string(
+            success_html,
+            email=result['email'],
+            provider_id=result['provider_id']
         )
     
     except ValueError as e:
-        current_app.logger.error(f"Microsoft OAuth callback error: {str(e)}")
-        frontend_url = request.args.get('redirect_uri', 'http://localhost:3000/oauth/callback')
-        return redirect(f"{frontend_url}?error={str(e)}&provider=microsoft")
+        error_msg = str(e)
+        current_app.logger.error(f"Microsoft OAuth callback error: {error_msg}")
+        
+        # Check if it's a state validation error
+        if "state" in error_msg.lower() or "expired" in error_msg.lower():
+            error_msg = "OAuth session expired. Please start the OAuth flow again from the beginning."
+        
+        frontend_url = request.args.get('redirect_uri')
+        if frontend_url:
+            return redirect(f"{frontend_url}?error={error_msg}&provider=microsoft")
+        
+        return render_template_string(error_html, error=error_msg)
     
     except Exception as e:
+        error_msg = f"Internal error: {str(e)}"
         current_app.logger.exception(f"Microsoft OAuth callback unexpected error: {str(e)}")
-        frontend_url = request.args.get('redirect_uri', 'http://localhost:3000/oauth/callback')
-        return redirect(f"{frontend_url}?error=internal_error&provider=microsoft")
+        
+        frontend_url = request.args.get('redirect_uri')
+        if frontend_url:
+            return redirect(f"{frontend_url}?error=internal_error&provider=microsoft")
+        
+        return render_template_string(error_html, error=error_msg)
 
 
 @bp.route('/google/authorize', methods=['GET'])
