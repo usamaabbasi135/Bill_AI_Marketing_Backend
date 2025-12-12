@@ -36,6 +36,7 @@ def create_app(config_class=Config):
         Campaign,
         CampaignProfile,
         Job,
+        UserEmailProvider,
     )
     
     # Register blueprints
@@ -51,6 +52,8 @@ def create_app(config_class=Config):
     app.register_blueprint(campaigns.bp, url_prefix='/api/campaigns')
     from app.api import emails
     app.register_blueprint(emails.bp, url_prefix='/api/emails')
+    from app.api import oauth
+    app.register_blueprint(oauth.bp, url_prefix='/api/auth/oauth')
     # Register profiles blueprint if it exists
     try:
         from app.api import profiles

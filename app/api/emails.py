@@ -471,16 +471,16 @@ def send_email(email_id):
     if not profile.email or not profile.email.strip():
         return jsonify({"error": "Recipient email not found"}), 400
     
-    # Validate AWS SES configuration
-    try:
-        from app.services.email_sender import get_ses_client
-        get_ses_client()
-    except ValueError as e:
-        return jsonify({"error": "AWS SES configuration error", "details": str(e)}), 500
+    # Validate email sending configuration (OAuth or SES)
+    # OAuth will be tried first if user has connected account, SES as fallback
+    # No need to validate here as both will be checked in the task
+    
+    # Get current user ID for OAuth sending
+    current_user_id = get_jwt_identity()
     
     # Start async task
     from app.tasks.email_sender_tasks import send_single_email_task
-    task = send_single_email_task.delay(email_id=email_id, tenant_id=tenant_id)
+    task = send_single_email_task.delay(email_id=email_id, tenant_id=tenant_id, user_id=current_user_id)
     
     return jsonify({
         "message": "Email sending started",
