@@ -1,6 +1,7 @@
 import csv
 import io
 import json
+import re
 from datetime import datetime
 
 from flask import Blueprint, request, jsonify, current_app, Response
@@ -377,6 +378,115 @@ def _extract_url_from_row(row, header_map=None):
     return row[0] if row else '', None, None
 
 
+def _validate_email(email_str):
+    """
+    Validate email address format (RFC 5322 compliant).
+    
+    Args:
+        email_str: Email address string to validate
+        
+    Returns:
+        tuple: (is_valid: bool, error_message: str or None)
+    """
+    if not email_str or not email_str.strip():
+        return False, "Email cannot be empty"
+    
+    email_str = email_str.strip()
+    
+    # RFC 5322 compliant regex pattern (simplified but covers most cases)
+    # This pattern matches: local-part@domain
+    # Local part: alphanumeric, dots, hyphens, underscores, plus signs
+    # Domain: alphanumeric, dots, hyphens
+    pattern = r'^[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    
+    if not re.match(pattern, email_str):
+        return False, "Invalid email format"
+    
+    # Additional checks
+    if len(email_str) > 255:
+        return False, "Email address too long (max 255 characters)"
+    
+    # Check for consecutive dots
+    if '..' in email_str:
+        return False, "Invalid email format (consecutive dots not allowed)"
+    
+    # Check that @ appears only once
+    if email_str.count('@') != 1:
+        return False, "Invalid email format (must contain exactly one @)"
+    
+    # Split and validate parts
+    parts = email_str.split('@')
+    local_part = parts[0]
+    domain = parts[1]
+    
+    if not local_part or len(local_part) > 64:
+        return False, "Invalid email format (local part too long or empty)"
+    
+    if not domain or len(domain) > 255:
+        return False, "Invalid email format (domain too long or empty)"
+    
+    # Domain must have at least one dot
+    if '.' not in domain:
+        return False, "Invalid email format (domain must contain a dot)"
+    
+    return True, None
+
+
+def _extract_lead_from_row(row, header_map=None):
+    """
+    Extract linkedin_url, email, name, and notes from CSV row.
+    
+    Args:
+        row: CSV row as list
+        header_map: Dictionary mapping column names to indices
+        
+    Returns:
+        tuple: (linkedin_url, email, name, notes, error_message)
+    """
+    if not header_map:
+        # Simple CSV format: first column is linkedin_url, second is email
+        if len(row) < 2:
+            return None, None, None, None, "CSV must contain 'linkedin_url' and 'email' columns"
+        linkedin_url = row[0].strip() if len(row) > 0 else ''
+        email = row[1].strip() if len(row) > 1 else ''
+        name = row[2].strip() if len(row) > 2 else None
+        notes = row[3].strip() if len(row) > 3 else None
+        return linkedin_url, email, name, notes, None
+    
+    # Header-based CSV
+    linkedin_idx = header_map.get('linkedin_url')
+    email_idx = header_map.get('email')
+    
+    if linkedin_idx is None:
+        return None, None, None, None, "CSV must contain 'linkedin_url' column"
+    if email_idx is None:
+        return None, None, None, None, "CSV must contain 'email' column"
+    
+    if linkedin_idx >= len(row):
+        return None, None, None, None, "linkedin_url column missing or out of bounds"
+    if email_idx >= len(row):
+        return None, None, None, None, "email column missing or out of bounds"
+    
+    linkedin_url = row[linkedin_idx].strip() if linkedin_idx < len(row) else ''
+    email = row[email_idx].strip() if email_idx < len(row) else ''
+    
+    name = None
+    if 'name' in header_map:
+        name_idx = header_map['name']
+        if name_idx is not None and name_idx < len(row):
+            name_val = row[name_idx].strip()
+            name = name_val if name_val else None
+    
+    notes = None
+    if 'notes' in header_map:
+        notes_idx = header_map['notes']
+        if notes_idx is not None and notes_idx < len(row):
+            notes_val = row[notes_idx].strip()
+            notes = notes_val if notes_val else None
+    
+    return linkedin_url, email, name, notes, None
+
+
 @bp.route('/bulk-upload', methods=['POST'])
 @jwt_required()
 def bulk_upload_profiles():
@@ -480,6 +590,267 @@ def download_bulk_template():
     writer.writerow(['https://www.linkedin.com/in/example/', 'Jane Doe', 'VP Marketing'])
     response = Response(output.getvalue(), mimetype='text/csv')
     response.headers['Content-Disposition'] = 'attachment; filename=profile_upload_template.csv'
+    return response
+
+
+@bp.route('/bulk-upload-leads', methods=['POST'])
+@jwt_required()
+def bulk_upload_leads():
+    """
+    Allow tenants to upload multiple leads (LinkedIn URLs with email addresses) via CSV.
+    
+    CSV Format:
+        - Required columns: linkedin_url, email
+        - Optional columns: name, notes
+    
+    Query Parameters:
+        - force_update: boolean (default: false) - If true, updates existing profiles even if they have an email
+    
+    Returns:
+        Summary with created, updated, skipped, failed counts and error details
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        current_app.logger.warning("Bulk upload leads: Missing tenant_id in JWT token")
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_app.logger.debug(f"Bulk upload leads: Request received for tenant_id={tenant_id}")
+    
+    # Check for force_update flag
+    force_update = request.args.get('force_update', 'false').lower() == 'true'
+    current_app.logger.debug(f"Bulk upload leads: force_update={force_update}")
+    
+    # Validate file upload
+    uploaded_file = request.files.get('file')
+    if not uploaded_file:
+        current_app.logger.warning("Bulk upload leads: No file provided")
+        return jsonify({"error": "No file provided"}), 400
+    
+    if not uploaded_file.filename.lower().endswith('.csv'):
+        current_app.logger.warning(f"Bulk upload leads: Invalid file type - {uploaded_file.filename}")
+        return jsonify({"error": "File must be CSV format"}), 400
+    
+    # Parse CSV
+    rows, parse_error = _parse_csv(uploaded_file)
+    if parse_error:
+        current_app.logger.warning(f"Bulk upload leads: CSV parse error - {parse_error}")
+        return jsonify({"error": parse_error}), 400
+    
+    if not rows:
+        current_app.logger.warning("Bulk upload leads: Empty CSV file")
+        return jsonify({"error": "Invalid CSV format"}), 400
+    
+    # Check row limit
+    if len(rows) > 1000:
+        current_app.logger.warning(f"Bulk upload leads: Too many rows - {len(rows)}")
+        return jsonify({"error": "Maximum 1000 leads allowed"}), 400
+    
+    current_app.logger.debug(f"Bulk upload leads: Parsed {len(rows)} rows from CSV")
+    
+    # Detect header row
+    header_map = None
+    first_row_lower = [cell.strip().lower() for cell in rows[0]]
+    has_linkedin = 'linkedin_url' in first_row_lower
+    has_email = 'email' in first_row_lower
+    
+    if has_linkedin and has_email:
+        # Header row detected with both required columns
+        header_map = {name: idx for idx, name in enumerate(first_row_lower)}
+        data_rows = rows[1:]
+        current_app.logger.debug("Bulk upload leads: Detected header row with linkedin_url and email")
+    elif has_linkedin or has_email:
+        # Header row detected but missing required column
+        if not has_linkedin:
+            current_app.logger.warning("Bulk upload leads: Header row missing linkedin_url column")
+            return jsonify({"error": "CSV must contain 'linkedin_url' and 'email' columns"}), 400
+        if not has_email:
+            current_app.logger.warning("Bulk upload leads: Header row missing email column")
+            return jsonify({"error": "CSV must contain 'linkedin_url' and 'email' columns"}), 400
+    else:
+        # No header row - assume first two columns are linkedin_url and email
+        data_rows = rows
+        current_app.logger.debug("Bulk upload leads: No header row detected, using first two columns")
+    
+    if not data_rows:
+        current_app.logger.warning("Bulk upload leads: No data rows found in CSV")
+        return jsonify({"error": "No profile rows found"}), 400
+    
+    # Validate required columns exist (for header-based CSV)
+    if header_map:
+        if 'linkedin_url' not in header_map:
+            current_app.logger.warning("Bulk upload leads: Missing linkedin_url column")
+            return jsonify({"error": "CSV must contain 'linkedin_url' and 'email' columns"}), 400
+        if 'email' not in header_map:
+            current_app.logger.warning("Bulk upload leads: Missing email column")
+            return jsonify({"error": "CSV must contain 'linkedin_url' and 'email' columns"}), 400
+    
+    current_app.logger.debug(f"Bulk upload leads: Processing {len(data_rows)} data rows")
+    
+    # Get existing profiles for this tenant (optimized query)
+    existing_profiles = Profile.query.filter_by(tenant_id=tenant_id).all()
+    existing_profiles_map = {p.linkedin_url: p for p in existing_profiles}
+    current_app.logger.debug(f"Bulk upload leads: Found {len(existing_profiles)} existing profiles for tenant")
+    
+    # Track processing
+    normalized_in_batch = set()
+    to_insert = []
+    to_update = []
+    errors = []
+    skipped = 0
+    
+    # Process each row
+    for idx, row in enumerate(data_rows, start=1):
+        current_app.logger.debug(f"Bulk upload leads: Processing row {idx}")
+        
+        # Extract data from row
+        linkedin_url, email, name, notes, extract_error = _extract_lead_from_row(row, header_map)
+        if extract_error:
+            current_app.logger.warning(f"Bulk upload leads: Row {idx} extraction error - {extract_error}")
+            errors.append({"row": idx, "error": extract_error})
+            continue
+        
+        # Validate LinkedIn URL
+        if not linkedin_url or not linkedin_url.strip():
+            current_app.logger.warning(f"Bulk upload leads: Row {idx} - empty linkedin_url")
+            errors.append({"row": idx, "error": "linkedin_url cannot be empty"})
+            continue
+        
+        normalized_url, username, normalize_error = _normalize_linkedin_url(linkedin_url)
+        if normalize_error:
+            current_app.logger.warning(f"Bulk upload leads: Row {idx} LinkedIn URL validation error - {normalize_error}")
+            errors.append({"row": idx, "error": normalize_error})
+            continue
+        
+        # Validate email
+        if not email or not email.strip():
+            current_app.logger.warning(f"Bulk upload leads: Row {idx} - empty email")
+            errors.append({"row": idx, "error": "email cannot be empty"})
+            continue
+        
+        is_valid_email, email_error = _validate_email(email)
+        if not is_valid_email:
+            current_app.logger.warning(f"Bulk upload leads: Row {idx} email validation error - {email_error}")
+            errors.append({"row": idx, "error": email_error})
+            continue
+        
+        email = email.strip()
+        
+        # Check for duplicates within batch
+        if normalized_url in normalized_in_batch:
+            current_app.logger.debug(f"Bulk upload leads: Row {idx} - duplicate URL in batch, skipping")
+            skipped += 1
+            continue
+        
+        normalized_in_batch.add(normalized_url)
+        
+        # Check if profile exists
+        existing_profile = existing_profiles_map.get(normalized_url)
+        
+        if existing_profile:
+            # Profile exists
+            current_app.logger.debug(
+                f"Bulk upload leads: Row {idx} - profile exists, "
+                f"current_email={existing_profile.email}, new_email={email}"
+            )
+            
+            # Check if profile already has an email
+            if existing_profile.email and not force_update:
+                current_app.logger.debug(
+                    f"Bulk upload leads: Row {idx} - profile already has email, skipping (force_update=false)"
+                )
+                skipped += 1
+                continue
+            
+            # Update profile with email
+            existing_profile.email = email
+            if name:
+                existing_profile.person_name = name
+            # Note: notes field doesn't exist in Profile model, so we skip it
+            to_update.append(existing_profile)
+            current_app.logger.debug(f"Bulk upload leads: Row {idx} - queued for update")
+        else:
+            # Create new profile
+            profile = Profile(
+                tenant_id=tenant_id,
+                linkedin_url=normalized_url,
+                email=email,
+                status='url_only',
+                person_name=name
+            )
+            to_insert.append(profile)
+            current_app.logger.debug(f"Bulk upload leads: Row {idx} - queued for creation")
+    
+    current_app.logger.debug(
+        f"Bulk upload leads: Processing complete - "
+        f"to_insert={len(to_insert)}, to_update={len(to_update)}, "
+        f"skipped={skipped}, errors={len(errors)}"
+    )
+    
+    # Validate we have something to process
+    if not to_insert and not to_update and not errors and skipped == 0:
+        current_app.logger.warning("Bulk upload leads: No valid leads found in CSV")
+        return jsonify({"error": "No valid leads found in CSV"}), 400
+    
+    # Perform batch insert/update in transaction
+    try:
+        if to_insert:
+            current_app.logger.debug(f"Bulk upload leads: Inserting {len(to_insert)} new profiles")
+            db.session.add_all(to_insert)
+        
+        if to_update:
+            current_app.logger.debug(f"Bulk upload leads: Updating {len(to_update)} existing profiles")
+            # Profiles are already in session, just need to commit
+        
+        db.session.commit()
+        current_app.logger.info(
+            f"Bulk upload leads: Successfully processed - "
+            f"created={len(to_insert)}, updated={len(to_update)}, "
+            f"skipped={skipped}, failed={len(errors)}"
+        )
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(f"Bulk upload leads: Database error - {exc}")
+        return jsonify({"error": "Database error occurred"}), 500
+    
+    # Build summary response
+    summary = {
+        "created": len(to_insert),
+        "updated": len(to_update),
+        "skipped": skipped,
+        "failed": len(errors),
+        "errors": errors,
+        "total_rows": len(data_rows)
+    }
+    
+    current_app.logger.debug(f"Bulk upload leads: Returning summary - {summary}")
+    return jsonify(summary), 201
+
+
+@bp.route('/bulk-upload-leads/template', methods=['GET'])
+@jwt_required()
+def download_bulk_leads_template():
+    """Provide CSV template for bulk leads upload (LinkedIn URLs with emails)."""
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_app.logger.debug(f"Bulk upload leads template: Request from tenant_id={tenant_id}")
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['linkedin_url', 'email', 'name', 'notes'])
+    writer.writerow([
+        'https://www.linkedin.com/in/example/',
+        'example@email.com',
+        'Jane Doe',
+        'VP Marketing - interested in product demo'
+    ])
+    response = Response(output.getvalue(), mimetype='text/csv')
+    response.headers['Content-Disposition'] = 'attachment; filename=leads_upload_template.csv'
+    
+    current_app.logger.debug("Bulk upload leads template: Template generated successfully")
     return response
 
 
