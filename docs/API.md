@@ -430,6 +430,122 @@ curl -X DELETE http://localhost:5000/api/companies/<COMPANY_ID> \
 
 ---
 
+### Bulk Upload Companies
+Upload multiple LinkedIn company URLs at once via CSV file. This allows users to add many companies quickly instead of one-by-one.
+
+**Endpoint:** `POST /api/companies/bulk-upload`
+
+**Auth Required:** Yes (Bearer access token)
+
+**Request:**
+- Content-Type: `multipart/form-data`
+- File field: `file` (CSV file)
+
+**CSV Format Examples:**
+
+**Simple format (URLs only):**
+```
+https://www.linkedin.com/company/openai/
+https://www.linkedin.com/company/microsoft/
+```
+
+**With headers:**
+```
+linkedin_url,name,notes
+https://www.linkedin.com/company/openai/,OpenAI,AI Research
+https://www.linkedin.com/company/microsoft/,Microsoft,Tech Giant
+```
+
+**Validation Rules:**
+- File must be CSV format (`.csv` extension)
+- Maximum 1000 companies per upload
+- LinkedIn URL format: `https://www.linkedin.com/company/<slug>/`
+- Duplicate URLs are skipped (doesn't fail entire upload)
+- If `name` is not provided, it will be auto-generated from the URL slug
+- `notes` column is accepted but not stored (for future use)
+
+**Success Response (201):**
+```json
+{
+  "added": 5,
+  "skipped": 2,
+  "failed": 1,
+  "errors": [
+    {"row": 3, "error": "Invalid LinkedIn company URL"}
+  ],
+  "total_rows": 8
+}
+```
+
+**Error Responses:**
+```json
+// 400 - No file provided
+{
+  "error": "No file provided"
+}
+
+// 400 - Wrong file type
+{
+  "error": "File must be CSV format"
+}
+
+// 400 - Too many rows
+{
+  "error": "Maximum 1000 companies allowed"
+}
+
+// 400 - Invalid CSV format
+{
+  "error": "Invalid CSV format"
+}
+
+// 401 - Missing/invalid token
+{
+  "error": "Unauthorized"
+}
+
+// 500 - Database error
+{
+  "error": "Database error occurred"
+}
+```
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:5000/api/companies/bulk-upload \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -F "file=@companies.csv"
+```
+
+---
+
+### Download Bulk Upload Template
+Download a CSV template file for bulk company uploads.
+
+**Endpoint:** `GET /api/companies/bulk-upload/template`
+
+**Auth Required:** Yes (Bearer access token)
+
+**Success Response (200):**
+- Content-Type: `text/csv`
+- Content-Disposition: `attachment; filename=company_upload_template.csv`
+- Body: CSV file with header row and example data
+
+**Template Content:**
+```
+linkedin_url,name,notes
+https://www.linkedin.com/company/openai/,OpenAI,AI research company
+```
+
+**cURL Example:**
+```bash
+curl -X GET http://localhost:5000/api/companies/bulk-upload/template \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -o company_upload_template.csv
+```
+
+---
+
 ### Scrape Company Posts
 Trigger LinkedIn post scraping for a company using Apify. This is an asynchronous operation that returns immediately with a job_id. The actual scraping runs in the background via Celery, and scraped posts are saved to the database.
 

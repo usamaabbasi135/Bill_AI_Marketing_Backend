@@ -1,4 +1,7 @@
-from flask import Blueprint, request, jsonify
+import csv
+import io
+import re
+from flask import Blueprint, request, jsonify, current_app, Response
 from flask_jwt_extended import jwt_required, get_jwt
 from marshmallow import Schema, fields, validates, ValidationError
 from app.extensions import db
@@ -435,4 +438,315 @@ def scrape_company(company_id):
             "error": "Failed to start scraping job",
             "details": error_msg
         }), 500
+
+
+def _parse_csv(file_storage):
+    """Parse CSV file from file storage object.
+    
+    Returns:
+        tuple: (rows, error_message) where rows is list of lists or None if error
+    """
+    try:
+        content = file_storage.read()
+        if isinstance(content, bytes):
+            content = content.decode('utf-8-sig')  # Handle BOM
+        stream = io.StringIO(content)
+        reader = csv.reader(stream)
+        rows = [row for row in reader if any(cell.strip() for cell in row)]  # Skip empty rows
+        return rows, None
+    except csv.Error as e:
+        current_app.logger.error(f"CSV parsing error: {str(e)}")
+        return None, "Invalid CSV format"
+    except Exception as e:
+        current_app.logger.error(f"Error reading CSV file: {str(e)}")
+        return None, "Invalid CSV format"
+
+
+def _normalize_linkedin_company_url(raw_url: str):
+    """Validate and normalize LinkedIn company URL.
+    
+    Args:
+        raw_url: Raw URL string from CSV
+        
+    Returns:
+        tuple: (normalized_url, error_message) where error_message is None if valid
+    """
+    if not raw_url or not raw_url.strip():
+        return None, "LinkedIn URL cannot be empty"
+    
+    url = raw_url.strip()
+    
+    # Add https:// if missing
+    if not url.lower().startswith(('http://', 'https://')):
+        url = f"https://{url}"
+    
+    # Validate format using the same pattern as CreateCompanySchema
+    pattern = r"^(https?:\/\/)?(www\.)?linkedin\.com\/company\/[A-Za-z0-9-_.%]+\/?(.*)?$"
+    if not re.match(pattern, url):
+        return None, "Invalid LinkedIn company URL format. Expected: https://www.linkedin.com/company/<slug>/"
+    
+    # Normalize to standard format
+    # Extract company slug
+    match = re.search(r'/company/([A-Za-z0-9-_.%]+)', url)
+    if not match:
+        return None, "Invalid LinkedIn company URL format"
+    
+    company_slug = match.group(1)
+    normalized = f"https://www.linkedin.com/company/{company_slug}/"
+    
+    return normalized, None
+
+
+def _extract_company_data_from_row(row, header_map=None):
+    """Extract company data from CSV row.
+    
+    Args:
+        row: List of CSV cell values
+        header_map: Dict mapping column names to indices (if header row exists)
+        
+    Returns:
+        tuple: (linkedin_url, name, notes, error_message)
+    """
+    if header_map:
+        # CSV has header row
+        linkedin_idx = header_map.get('linkedin_url')
+        if linkedin_idx is None or linkedin_idx >= len(row):
+            return None, None, None, "linkedin_url column missing"
+        
+        linkedin_url = row[linkedin_idx].strip() if linkedin_idx < len(row) else ''
+        name = None
+        notes = None
+        
+        if 'name' in header_map:
+            name_idx = header_map['name']
+            if name_idx is not None and name_idx < len(row):
+                name = row[name_idx].strip() or None
+        
+        if 'notes' in header_map:
+            notes_idx = header_map.get('notes')
+            if notes_idx is not None and notes_idx < len(row):
+                notes = row[notes_idx].strip() or None
+        
+        return linkedin_url, name, notes, None
+    else:
+        # Simple CSV: first column is URL, optional second column is name
+        if not row or len(row) == 0:
+            return None, None, None, "Empty row"
+        
+        linkedin_url = row[0].strip() if len(row) > 0 else ''
+        name = row[1].strip() if len(row) > 1 and row[1].strip() else None
+        notes = row[2].strip() if len(row) > 2 and row[2].strip() else None
+        
+        return linkedin_url, name, notes, None
+
+
+@bp.route('/bulk-upload', methods=['POST'])
+@jwt_required()
+def bulk_upload_companies():
+    """Bulk upload multiple LinkedIn company URLs via CSV file.
+    
+    Accepts CSV file with:
+    - Simple format: One URL per line (first column)
+    - Header format: Columns: linkedin_url, name, notes
+    
+    Supports up to 1000 companies per upload.
+    Skips duplicates (doesn't fail entire upload).
+    Returns summary with added/skipped/failed counts.
+    """
+    current_app.logger.debug("Bulk upload companies: Request received")
+    
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        current_app.logger.warning("Bulk upload companies: Missing tenant_id in JWT token")
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_app.logger.debug(f"Bulk upload companies: Processing for tenant_id={tenant_id}")
+    
+    # Check for file
+    uploaded_file = request.files.get('file')
+    if not uploaded_file:
+        current_app.logger.warning("Bulk upload companies: No file provided")
+        return jsonify({"error": "No file provided"}), 400
+    
+    # Validate file type
+    if not uploaded_file.filename or not uploaded_file.filename.lower().endswith('.csv'):
+        current_app.logger.warning(f"Bulk upload companies: Invalid file type: {uploaded_file.filename}")
+        return jsonify({"error": "File must be CSV format"}), 400
+    
+    current_app.logger.debug(f"Bulk upload companies: Parsing CSV file: {uploaded_file.filename}")
+    
+    # Parse CSV
+    rows, parse_error = _parse_csv(uploaded_file)
+    if parse_error:
+        current_app.logger.error(f"Bulk upload companies: CSV parse error: {parse_error}")
+        return jsonify({"error": parse_error}), 400
+    
+    if not rows:
+        current_app.logger.warning("Bulk upload companies: Empty CSV file")
+        return jsonify({"error": "Invalid CSV format"}), 400
+    
+    current_app.logger.debug(f"Bulk upload companies: Parsed {len(rows)} rows")
+    
+    # Detect header row
+    header_map = None
+    first_row_lower = [cell.strip().lower() for cell in rows[0]]
+    if 'linkedin_url' in first_row_lower:
+        header_map = {name: idx for idx, name in enumerate(first_row_lower)}
+        data_rows = rows[1:]
+        current_app.logger.debug("Bulk upload companies: Detected header row with columns: %s", list(header_map.keys()))
+    else:
+        data_rows = rows
+        current_app.logger.debug("Bulk upload companies: No header row detected, using simple format")
+    
+    if not data_rows:
+        current_app.logger.warning("Bulk upload companies: No data rows found")
+        return jsonify({"error": "No company rows found in CSV"}), 400
+    
+    # Check row limit (count data rows, not including header)
+    if len(data_rows) > 1000:
+        current_app.logger.warning(f"Bulk upload companies: Too many rows: {len(data_rows)}")
+        return jsonify({"error": "Maximum 1000 companies allowed"}), 400
+    
+    current_app.logger.debug(f"Bulk upload companies: Processing {len(data_rows)} data rows")
+    
+    # Get existing companies for duplicate check
+    existing_companies = Company.query.filter_by(tenant_id=tenant_id).all()
+    existing_urls = {c.linkedin_url for c in existing_companies}
+    current_app.logger.debug(f"Bulk upload companies: Found {len(existing_urls)} existing companies for tenant")
+    
+    # Process rows
+    normalized_in_batch = set()  # Track URLs in current batch to avoid duplicates within batch
+    to_insert = []
+    errors = []
+    skipped = 0
+    
+    for idx, row in enumerate(data_rows, start=1):
+        linkedin_url, name, notes, row_error = _extract_company_data_from_row(row, header_map)
+        
+        if row_error:
+            current_app.logger.debug(f"Bulk upload companies: Row {idx} extraction error: {row_error}")
+            errors.append({"row": idx, "error": row_error})
+            continue
+        
+        # Normalize and validate URL
+        normalized_url, normalize_error = _normalize_linkedin_company_url(linkedin_url)
+        if normalize_error:
+            current_app.logger.debug(f"Bulk upload companies: Row {idx} URL validation error: {normalize_error}")
+            errors.append({"row": idx, "error": normalize_error})
+            continue
+        
+        # Check for duplicates
+        if normalized_url in existing_urls or normalized_url in normalized_in_batch:
+            current_app.logger.debug(f"Bulk upload companies: Row {idx} skipped (duplicate): {normalized_url}")
+            skipped += 1
+            continue
+        
+        # Generate company name if not provided
+        if not name or not name.strip():
+            # Extract company slug from URL as fallback name
+            match = re.search(r'/company/([A-Za-z0-9-_.%]+)', normalized_url)
+            if match:
+                name = match.group(1).replace('-', ' ').replace('_', ' ').title()
+            else:
+                name = "Unknown Company"
+        
+        # Validate name length
+        name = name.strip()
+        if len(name) < 2:
+            name = "Unknown Company"
+        if len(name) > 255:
+            name = name[:255]
+        
+        # Create company object
+        company = Company(
+            tenant_id=tenant_id,
+            name=name,
+            linkedin_url=normalized_url,
+            is_active=True
+        )
+        to_insert.append(company)
+        normalized_in_batch.add(normalized_url)
+    
+    current_app.logger.debug(
+        f"Bulk upload companies: Processed rows - to_insert={len(to_insert)}, "
+        f"skipped={skipped}, errors={len(errors)}"
+    )
+    
+    # Check if we have anything to process
+    if not to_insert and not errors and skipped == 0:
+        current_app.logger.warning("Bulk upload companies: No valid companies found")
+        return jsonify({"error": "No valid companies found in CSV"}), 400
+    
+    # Batch insert with transaction
+    added = 0
+    try:
+        if to_insert:
+            current_app.logger.debug(f"Bulk upload companies: Inserting {len(to_insert)} companies")
+            db.session.add_all(to_insert)
+            db.session.commit()
+            added = len(to_insert)
+            current_app.logger.info(
+                f"Bulk upload companies: Successfully added {added} companies for tenant_id={tenant_id}"
+            )
+    except Exception as exc:
+        db.session.rollback()
+        current_app.logger.exception(f"Bulk upload companies: Database error: {str(exc)}")
+        return jsonify({"error": "Database error occurred"}), 500
+    
+    # Prepare summary
+    summary = {
+        "added": added,
+        "skipped": skipped,
+        "failed": len(errors),
+        "errors": errors,
+        "total_rows": len(data_rows)
+    }
+    
+    current_app.logger.info(
+        f"Bulk upload companies: Summary - added={added}, skipped={skipped}, "
+        f"failed={len(errors)}, total_rows={len(data_rows)}"
+    )
+    
+    return jsonify(summary), 201
+
+
+@bp.route('/bulk-upload/template', methods=['GET'])
+@jwt_required()
+def download_bulk_upload_template():
+    """Download CSV template for bulk company uploads.
+    
+    Template includes example row with linkedin_url, name, and notes columns.
+    """
+    current_app.logger.debug("Bulk upload template: Request received")
+    
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        current_app.logger.warning("Bulk upload template: Missing tenant_id in JWT token")
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_app.logger.debug(f"Bulk upload template: Generating template for tenant_id={tenant_id}")
+    
+    # Create CSV template
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Write header row
+    writer.writerow(['linkedin_url', 'name', 'notes'])
+    
+    # Write example row
+    writer.writerow([
+        'https://www.linkedin.com/company/openai/',
+        'OpenAI',
+        'AI research company'
+    ])
+    
+    # Create response
+    response = Response(output.getvalue(), mimetype='text/csv')
+    response.headers['Content-Disposition'] = 'attachment; filename=company_upload_template.csv'
+    
+    current_app.logger.debug("Bulk upload template: Template generated successfully")
+    
+    return response
 
