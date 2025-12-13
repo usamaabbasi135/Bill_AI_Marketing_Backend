@@ -340,7 +340,7 @@
           }
         },
         {
-          "name": "Delete Company (Soft Delete)",
+          "name": "Delete Company (Hard Delete)",
           "request": {
             "method": "DELETE",
             "header": [
@@ -354,7 +354,7 @@
               "host": ["{{baseUrl}}"],
               "path": ["api", "companies", "{{company_id}}"]
             },
-            "description": "Soft delete a company (sets is_active=false). Company data is preserved but marked inactive. Must own the company."
+            "description": "Hard delete a company (permanently removes from database). Company data is permanently deleted. Must own the company. Cannot delete if company has posts or is linked to campaigns."
           }
         },
         {
@@ -406,6 +406,35 @@
               "path": ["api", "companies", "{{company_id}}", "scrape"]
             },
             "description": "Trigger LinkedIn post scraping with max_posts in request body instead of query parameter."
+          }
+        },
+        {
+          "name": "Bulk Upload Companies (CSV)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "CSV file with company data. Columns: name, linkedin_url"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/companies/bulk-upload",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "companies", "bulk-upload"]
+            },
+            "description": "Upload multiple companies via CSV file. CSV should have columns: name, linkedin_url. Maximum 1000 companies per upload."
           }
         }
       ]
@@ -730,6 +759,24 @@
               "path": ["api", "profiles", "{{profile_id}}", "scrape"]
             },
             "description": "Scrape a single profile by ID. Returns job_id immediately (async task). Use job_id to check status via GET /api/jobs/{job_id}."
+          }
+        },
+        {
+          "name": "Get Profile by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles/{{profile_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles", "{{profile_id}}"]
+            },
+            "description": "Get a single profile by ID with full details. Returns complete profile information including experiences, skills, educations, and all profile fields. Must own the profile (same tenant)."
           }
         },
         {
@@ -1339,6 +1386,35 @@
             },
             "description": "Send a single email via AWS SES (async). Returns job_id immediately. Email must have status='draft' and recipient must have a valid email address. Email status is updated to 'sent' after successful delivery."
           }
+        },
+        {
+          "name": "Bulk Upload Leads/Emails (CSV)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "CSV file with lead/email data. Columns: email, name (optional), profile_id (optional)"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/emails/bulk-upload",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "emails", "bulk-upload"]
+            },
+            "description": "Upload multiple leads/emails via CSV file. CSV should have columns: email, name (optional), profile_id (optional). Maximum 1000 emails per upload. Creates draft emails for each lead."
+          }
         }
       ]
     },
@@ -1397,6 +1473,24 @@
               ]
             },
             "description": "List scraped LinkedIn posts with filtering, pagination, and sorting. Returns posts sorted by date (newest first). Includes company name from JOIN with companies table. Multi-tenant: only returns posts from user's tenant."
+          }
+        },
+        {
+          "name": "Get Post by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/{{post_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "posts", "{{post_id}}"]
+            },
+            "description": "Get a single post by ID with full details. Returns complete post information including post_text, post_date, score, ai_judgement, source_url, company information, and metadata. Must own the post (same tenant)."
           }
         },
         {
