@@ -158,6 +158,76 @@ def list_posts():
     }), 200
 
 
+@bp.route('/<post_id>', methods=['GET'])
+@jwt_required()
+def get_post(post_id):
+    """
+    Retrieve a single post by its post ID.
+    
+    Requirements:
+    - JWT authentication required
+    - Post must exist and belong to the requesting tenant
+    
+    Returns:
+    - 200: Post object with company information (same format as list_posts)
+    - 401: Unauthorized (JWT missing or invalid)
+    - 403: Forbidden (post belongs to different tenant)
+    - 404: Post not found
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    
+    if not tenant_id:
+        current_app.logger.warning("Get post: Missing tenant_id in JWT token")
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_app.logger.debug(f"Get post: Request for post_id={post_id}, tenant_id={tenant_id}")
+    
+    # Query post with JOIN to Company table (similar to list_posts)
+    result = db.session.query(Post, Company.name.label('company_name')).join(
+        Company, Post.company_id == Company.company_id
+    ).filter(
+        Post.post_id == post_id,
+        Post.tenant_id == tenant_id,
+        Company.tenant_id == tenant_id  # Ensure company belongs to tenant
+    ).first()
+    
+    if not result:
+        # Check if post exists but belongs to different tenant
+        post_exists = Post.query.filter_by(post_id=post_id).first()
+        if post_exists:
+            if post_exists.tenant_id != tenant_id:
+                current_app.logger.warning(
+                    f"Get post: Forbidden - post belongs to different tenant. "
+                    f"post_id={post_id}, post_tenant_id={post_exists.tenant_id}, requesting_tenant_id={tenant_id}"
+                )
+                return jsonify({"error": "Forbidden"}), 403
+        
+        current_app.logger.warning(f"Get post: Post not found post_id={post_id}, tenant_id={tenant_id}")
+        return jsonify({"error": "Post not found"}), 404
+    
+    post, company_name = result
+    
+    current_app.logger.debug(
+        f"Get post: Successfully retrieved post_id={post_id}, "
+        f"company_id={post.company_id}, company_name={company_name}, tenant_id={tenant_id}"
+    )
+    
+    # Return post in same format as list_posts response
+    return jsonify({
+        "post_id": post.post_id,
+        "company_id": post.company_id,
+        "company_name": company_name,
+        "post_text": post.post_text,
+        "post_date": post.post_date.isoformat() if post.post_date else None,
+        "score": post.score,
+        "ai_judgement": post.ai_judgement,
+        "source_url": post.source_url,
+        "created_at": post.created_at.isoformat() if post.created_at else None,
+        "analyzed_at": post.analyzed_at.isoformat() if post.analyzed_at else None
+    }), 200
+
+
 @bp.route('/<post_id>/analyze', methods=['POST'])
 @jwt_required()
 def analyze_single_post(post_id):
