@@ -252,32 +252,80 @@ def update_company(company_id):
 @bp.route('/<company_id>', methods=['DELETE'])
 @jwt_required()
 def delete_company(company_id):
-    """Soft delete a company (set is_active=false) for the current tenant."""
+    """
+    Hard delete a company (permanently remove from database) for the current tenant.
+    
+    Requirements:
+    - JWT authentication required
+    - Company must exist and belong to the requesting tenant
+    
+    Returns:
+    - 200: Success message indicating company was permanently deleted
+    - 401: Unauthorized (JWT missing or invalid)
+    - 403: Forbidden (company belongs to different tenant)
+    - 404: Company not found
+    - 500: Internal Server Error (database error)
+    
+    Note:
+    - Related posts are automatically deleted via CASCADE foreign key constraint
+    - This is a permanent deletion and cannot be undone
+    """
 
     claims = get_jwt()
     tenant_id = claims.get('tenant_id')
+    
     if not tenant_id:
+        current_app.logger.warning("Delete company: Missing tenant_id in JWT token")
         return jsonify({"error": "Unauthorized"}), 401
 
-    company = Company.query.filter_by(company_id=company_id).first()
-    if not company:
-        return jsonify({"error": "Company not found"}), 404
+    current_app.logger.debug(f"Delete company: Request for company_id={company_id}, tenant_id={tenant_id}")
 
-    if company.tenant_id != tenant_id:
-        return jsonify({"error": "Forbidden"}), 403
+    try:
+        # Verify company exists
+        company = Company.query.filter_by(company_id=company_id).first()
+        
+        if not company:
+            current_app.logger.warning(f"Delete company: Company not found company_id={company_id}, tenant_id={tenant_id}")
+            return jsonify({"error": "Company not found"}), 404
 
-    company.is_active = False
-    db.session.commit()
+        # Verify company belongs to requesting tenant
+        if company.tenant_id != tenant_id:
+            current_app.logger.warning(
+                f"Delete company: Forbidden - company belongs to different tenant. "
+                f"company_id={company_id}, company_tenant_id={company.tenant_id}, requesting_tenant_id={tenant_id}"
+            )
+            return jsonify({"error": "Forbidden"}), 403
 
-    company_obj = {
-        "company_id": company.company_id,
-        "name": company.name,
-        "linkedin_url": company.linkedin_url,
-        "is_active": company.is_active,
-        "created_at": company.created_at.isoformat() if company.created_at else None,
-    }
+        # Store company info for logging before deletion
+        company_name = company.name
+        company_linkedin_url = company.linkedin_url
+        
+        current_app.logger.debug(
+            f"Delete company: Company found company_id={company_id}, "
+            f"name={company_name}, linkedin_url={company_linkedin_url}, tenant_id={tenant_id}"
+        )
 
-    return jsonify({"company": company_obj}), 200
+        # Hard delete the company (related posts will be deleted via CASCADE)
+        db.session.delete(company)
+        db.session.commit()
+
+        current_app.logger.info(
+            f"Delete company: Successfully deleted company. "
+            f"company_id={company_id}, name={company_name}, "
+            f"linkedin_url={company_linkedin_url}, tenant_id={tenant_id}"
+        )
+
+        return jsonify({"message": "Company permanently deleted"}), 200
+
+    except Exception as e:
+        current_app.logger.exception(
+            f"Delete company: Error deleting company_id={company_id}, tenant_id={tenant_id}: {str(e)}"
+        )
+        db.session.rollback()
+        return jsonify({
+            "error": "Failed to delete company",
+            "details": str(e)
+        }), 500
 
 
 @bp.route('/<company_id>/scrape', methods=['POST'])
