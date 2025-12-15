@@ -1,7 +1,7 @@
 """
-AWS SES Email Sender Service
+Email Sender Service
 
-Handles sending emails via AWS Simple Email Service (SES).
+Handles sending emails via OAuth (Microsoft Graph API, Gmail API) with fallback to AWS SES.
 """
 import logging
 import boto3
@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 
 from app.config import Config
+from app.services.oauth_email_sender import OAuthEmailSender
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,8 @@ def send_email_via_ses(
     recipient_email: str,
     subject: str,
     body: str,
-    sender_email: Optional[str] = None
+    sender_email: Optional[str] = None,
+    user_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Send email via AWS SES.
@@ -63,6 +65,7 @@ def send_email_via_ses(
         subject: Email subject
         body: Email body (plain text)
         sender_email: Sender email (defaults to SES_SENDER_EMAIL from config)
+        user_id: Optional user ID (not used for SES, but kept for compatibility)
     
     Returns:
         Dict with 'message_id' and 'success' keys
@@ -166,4 +169,100 @@ def is_transient_error(error: Exception) -> bool:
         error_code = getattr(error, 'response', {}).get('Error', {}).get('Code', '') if hasattr(error, 'response') else ''
         return error_code in ['Throttling', 'ServiceUnavailable', 'TooManyRequests', 'RequestTimeout']
     return False
+
+
+def send_email(
+    recipient_email: str,
+    subject: str,
+    body: str,
+    user_id: Optional[str] = None,
+    sender_email: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Send email with OAuth fallback to AWS SES.
+    
+    This function:
+    1. Attempts to send via OAuth if user_id is provided and user has connected OAuth account
+    2. Falls back to AWS SES if OAuth is not available or fails
+    
+    Args:
+        recipient_email: Recipient email address
+        subject: Email subject
+        body: Email body (plain text)
+        user_id: Optional user ID to use OAuth sending
+        sender_email: Optional sender email (for SES fallback)
+    
+    Returns:
+        Dict with 'message_id', 'success', and 'method' ('oauth' or 'ses') keys
+    
+    Raises:
+        ValueError: If sending fails
+    """
+    # Try OAuth first if user_id is provided
+    if user_id:
+        try:
+            logger.debug(f"Attempting OAuth email send for user_id={user_id}")
+            result = OAuthEmailSender.send_email_via_oauth(
+                user_id=user_id,
+                recipient_email=recipient_email,
+                subject=subject,
+                body=body
+            )
+            
+            if result:
+                logger.info(f"Email sent via OAuth ({result.get('provider')})", extra={
+                    "user_id": user_id,
+                    "recipient": recipient_email,
+                    "method": "oauth",
+                    "provider": result.get('provider')
+                })
+                return {
+                    'success': True,
+                    'message_id': result.get('message_id'),
+                    'method': 'oauth',
+                    'provider': result.get('provider')
+                }
+            else:
+                logger.debug(f"No OAuth provider found for user_id={user_id}, falling back to SES")
+        except Exception as e:
+            logger.warning(f"OAuth email send failed, falling back to SES: {str(e)}", extra={
+                "user_id": user_id,
+                "recipient": recipient_email,
+                "error": str(e)
+            })
+            # Continue to SES fallback
+    
+    # Fallback to AWS SES
+    logger.debug("Sending email via AWS SES", extra={
+        "recipient": recipient_email,
+        "method": "ses"
+    })
+    
+    try:
+        result = send_email_via_ses(
+            recipient_email=recipient_email,
+            subject=subject,
+            body=body,
+            sender_email=sender_email,
+            user_id=user_id
+        )
+        
+        logger.info("Email sent via AWS SES", extra={
+            "recipient": recipient_email,
+            "method": "ses",
+            "message_id": result.get('message_id')
+        })
+        
+        return {
+            'success': True,
+            'message_id': result.get('message_id'),
+            'method': 'ses'
+        }
+    
+    except Exception as e:
+        logger.error(f"Failed to send email via SES: {str(e)}", extra={
+            "recipient": recipient_email,
+            "error": str(e)
+        })
+        raise
 
