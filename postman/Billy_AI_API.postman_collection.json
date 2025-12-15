@@ -804,6 +804,24 @@
             },
             "description": "Bulk delete multiple profiles. Request body: {\"ids\": [\"uuid1\", \"uuid2\", ...]}. Maximum 100 profiles per request. Returns 200 if all succeed, 207 (Multi-Status) if partial success, 400 if all fail. Validation: All IDs must belong to tenant, cannot delete profiles linked to campaigns, cannot delete profiles with sent emails. Response includes deleted_count and results with successful/failed arrays."
           }
+        },
+        {
+          "name": "Delete Profile",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/profiles/{{profile_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "profiles", "{{profile_id}}"]
+            },
+            "description": "Delete a profile by ID. Requirements: Profile must exist and belong to the requesting tenant. Profile must not be linked to any active campaigns. Email records will have their profile_id set to NULL if possible. Returns 200 on success, 400 if profile is linked to active campaigns, 403 if profile belongs to different tenant, 404 if profile not found."
+          }
         }
       ]
     },
@@ -1591,6 +1609,24 @@
               "path": ["api", "posts", "bulk"]
             },
             "description": "Bulk delete multiple posts. Request body: {\"ids\": [\"uuid1\", \"uuid2\", ...]}. Maximum 100 posts per request. Returns 200 if all succeed, 207 (Multi-Status) if partial success, 400 if all fail. Validation: All IDs must belong to tenant, cannot delete posts linked to campaigns, cannot delete posts with sent emails. Response includes deleted_count and results with successful/failed arrays."
+          }
+        },
+        {
+          "name": "Delete Post",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/posts/{{post_id}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "posts", "{{post_id}}"]
+            },
+            "description": "Delete a post by ID. Requirements: Post must exist and belong to the requesting tenant. Post must not be linked to any campaigns. Post must not have any sent emails (status='sent'). Draft emails will be deleted via CASCADE. Returns 200 on success, 400 if post is linked to campaigns or has sent emails, 403 if post belongs to different tenant, 404 if post not found."
           }
         }
       ]

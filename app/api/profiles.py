@@ -10,6 +10,8 @@ from sqlalchemy import or_
 
 from app.extensions import db
 from app.models.profile import Profile
+from app.models.campaign import CampaignProfile
+from app.models.email import Email
 
 bp = Blueprint('profiles', __name__)
 
@@ -701,6 +703,39 @@ def scrape_single_profile(profile_id):
         }), 500
 
 
+@bp.route('/<profile_id>', methods=['GET'])
+@jwt_required()
+def get_profile(profile_id):
+    """
+    Get a single profile by ID with full details.
+    
+    Returns complete profile information including experiences, skills, educations, and all profile fields.
+    Must own the profile (same tenant).
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    if not tenant_id:
+        current_app.logger.warning("Get profile: Missing tenant_id in JWT token")
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_app.logger.debug(f"Get profile: Request for profile_id={profile_id}, tenant_id={tenant_id}")
+    
+    # Verify profile exists and belongs to tenant
+    profile = Profile.query.filter_by(profile_id=profile_id).first()
+    if not profile:
+        current_app.logger.warning(f"Get profile: Profile not found profile_id={profile_id}")
+        return jsonify({"error": "Profile not found"}), 404
+    
+    if profile.tenant_id != tenant_id:
+        current_app.logger.warning(f"Get profile: Forbidden - profile belongs to different tenant profile_id={profile_id}")
+        return jsonify({"error": "Forbidden"}), 403
+    
+    current_app.logger.debug(f"Get profile: Returning profile_id={profile_id}")
+    
+    profile_data = _profile_to_dict(profile)
+    return jsonify({"profile": profile_data}), 200
+
+
 @bp.route('/bulk', methods=['DELETE'])
 @jwt_required()
 def bulk_delete_profiles():
@@ -893,5 +928,124 @@ def bulk_delete_profiles():
         db.session.rollback()
         return jsonify({
             "error": "Internal server error",
+            "details": str(e)
+        }), 500
+
+
+@bp.route('/<profile_id>', methods=['DELETE'])
+@jwt_required()
+def delete_profile(profile_id):
+    """
+    Delete a profile by ID.
+    
+    Requirements:
+    - Profile must exist and belong to the requesting tenant
+    - Profile must not be linked to any active campaigns
+    - Email records will have their profile_id set to NULL if possible
+    
+    Returns:
+    - 200: Profile deleted successfully
+    - 400: Profile is linked to active campaigns
+    - 403: Profile belongs to different tenant
+    - 404: Profile not found
+    - 500: Database error
+    """
+    claims = get_jwt()
+    tenant_id = claims.get('tenant_id')
+    
+    if not tenant_id:
+        current_app.logger.warning("Delete profile: Missing tenant_id in JWT token")
+        return jsonify({"error": "Unauthorized"}), 401
+    
+    current_app.logger.debug(f"Delete profile: Request for profile_id={profile_id}, tenant_id={tenant_id}")
+    
+    try:
+        # Verify profile exists
+        profile = Profile.query.filter_by(profile_id=profile_id).first()
+        
+        if not profile:
+            current_app.logger.warning(f"Delete profile: Profile not found profile_id={profile_id}, tenant_id={tenant_id}")
+            return jsonify({"error": "Profile not found"}), 404
+        
+        # Verify profile belongs to requesting tenant
+        if profile.tenant_id != tenant_id:
+            current_app.logger.warning(
+                f"Delete profile: Forbidden - profile belongs to different tenant. "
+                f"profile_id={profile_id}, profile_tenant_id={profile.tenant_id}, requesting_tenant_id={tenant_id}"
+            )
+            return jsonify({"error": "Forbidden"}), 403
+        
+        current_app.logger.debug(
+            f"Delete profile: Profile found profile_id={profile_id}, "
+            f"person_name={profile.person_name}, tenant_id={tenant_id}"
+        )
+        
+        # Check if profile is linked to any active campaigns
+        active_campaign_profiles = CampaignProfile.query.filter_by(profile_id=profile_id).all()
+        
+        if active_campaign_profiles:
+            campaign_ids = [cp.campaign_id for cp in active_campaign_profiles]
+            current_app.logger.warning(
+                f"Delete profile: Cannot delete - profile is linked to active campaigns. "
+                f"profile_id={profile_id}, campaign_ids={campaign_ids}, tenant_id={tenant_id}"
+            )
+            return jsonify({
+                "error": "Cannot delete profile: profile is linked to active campaigns"
+            }), 400
+        
+        current_app.logger.debug(f"Delete profile: No active campaign links found for profile_id={profile_id}")
+        
+        # Check for emails linked to this profile
+        emails_linked = Email.query.filter_by(profile_id=profile_id).count()
+        
+        if emails_linked > 0:
+            current_app.logger.debug(
+                f"Delete profile: Found {emails_linked} email(s) linked to profile_id={profile_id}. "
+                f"Attempting to set profile_id to NULL"
+            )
+            
+            # Try to set profile_id to NULL for linked emails
+            # Note: This will only work if the foreign key constraint allows SET NULL
+            # If it's RESTRICT, this will raise an IntegrityError which we'll catch
+            try:
+                Email.query.filter_by(profile_id=profile_id).update({Email.profile_id: None})
+                db.session.flush()  # Flush to check for constraint violations
+                current_app.logger.debug(
+                    f"Delete profile: Successfully set profile_id to NULL for {emails_linked} email(s)"
+                )
+            except Exception as email_update_error:
+                # If we can't set to NULL (e.g., RESTRICT constraint), prevent deletion
+                current_app.logger.error(
+                    f"Delete profile: Cannot set profile_id to NULL for emails. "
+                    f"profile_id={profile_id}, error={str(email_update_error)}"
+                )
+                db.session.rollback()
+                return jsonify({
+                    "error": "Cannot delete profile: profile has associated emails that cannot be unlinked"
+                }), 400
+        
+        # Delete the profile (CampaignProfile entries will be CASCADE deleted automatically)
+        profile_person_name = profile.person_name
+        profile_linkedin_url = profile.linkedin_url
+        
+        db.session.delete(profile)
+        db.session.commit()
+        
+        current_app.logger.info(
+            f"Delete profile: Successfully deleted profile. "
+            f"profile_id={profile_id}, person_name={profile_person_name}, "
+            f"linkedin_url={profile_linkedin_url}, tenant_id={tenant_id}, "
+            f"emails_unlinked={emails_linked}"
+        )
+        
+        return jsonify({"message": "Profile deleted successfully"}), 200
+        
+    except Exception as e:
+        current_app.logger.exception(
+            f"Delete profile: Error deleting profile_id={profile_id}, tenant_id={tenant_id}: {str(e)}"
+        )
+        db.session.rollback()
+        return jsonify({
+            "error": "Failed to delete profile",
             "details": str(e)
         }), 500
