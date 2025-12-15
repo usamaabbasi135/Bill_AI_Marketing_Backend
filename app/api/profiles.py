@@ -253,55 +253,6 @@ def list_profiles():
     }), 200
 
 
-@bp.route('/<profile_id>', methods=['GET'])
-@jwt_required()
-def get_profile(profile_id):
-    """
-    Retrieve a single profile by its profile ID.
-    
-    Requirements:
-    - JWT authentication required
-    - Profile must exist and belong to the requesting tenant
-    
-    Returns:
-    - 200: Profile object using _profile_to_dict()
-    - 401: Unauthorized (JWT missing or invalid)
-    - 403: Forbidden (profile belongs to different tenant)
-    - 404: Profile not found
-    """
-    claims = get_jwt()
-    tenant_id = claims.get('tenant_id')
-    
-    if not tenant_id:
-        current_app.logger.warning("Get profile: Missing tenant_id in JWT token")
-        return jsonify({"error": "Unauthorized"}), 401
-    
-    current_app.logger.debug(f"Get profile: Request for profile_id={profile_id}, tenant_id={tenant_id}")
-    
-    # Query profile by profile_id
-    profile = Profile.query.filter_by(profile_id=profile_id).first()
-    
-    if not profile:
-        current_app.logger.warning(f"Get profile: Profile not found profile_id={profile_id}, tenant_id={tenant_id}")
-        return jsonify({"error": "Profile not found"}), 404
-    
-    # Verify profile belongs to requesting tenant
-    if profile.tenant_id != tenant_id:
-        current_app.logger.warning(
-            f"Get profile: Forbidden - profile belongs to different tenant. "
-            f"profile_id={profile_id}, profile_tenant_id={profile.tenant_id}, requesting_tenant_id={tenant_id}"
-        )
-        return jsonify({"error": "Forbidden"}), 403
-    
-    current_app.logger.debug(
-        f"Get profile: Successfully retrieved profile_id={profile_id}, "
-        f"person_name={profile.person_name}, tenant_id={tenant_id}"
-    )
-    
-    # Return profile using _profile_to_dict() helper function
-    return jsonify(_profile_to_dict(profile)), 200
-
-
 def _normalize_linkedin_url(raw_url: str):
     """Validate and normalize LinkedIn profile URLs."""
     if not raw_url:
