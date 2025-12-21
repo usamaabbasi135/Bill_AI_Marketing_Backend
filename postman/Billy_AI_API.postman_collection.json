@@ -54,11 +54,6 @@
       "key": "email_id",
       "value": "",
       "type": "string"
-    },
-    {
-      "key": "provider_id",
-      "value": "",
-      "type": "string"
     }
   ],
   "item": [
@@ -188,165 +183,6 @@
             },
             "description": "Get information about the currently authenticated user."
           }
-        }
-      ]
-    },
-    {
-      "name": "OAuth",
-      "item": [
-        {
-          "name": "Get Gmail Authorization URL",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/oauth/google/authorize",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "oauth", "google", "authorize"]
-            },
-            "description": "Start Google OAuth flow to connect Gmail account. Returns authorization_url that should be opened in browser/popup. User will authorize the app, then be redirected to callback URL. Use the authorization_url to redirect user to Google's OAuth consent page."
-          },
-          "response": []
-        },
-        {
-          "name": "Get Microsoft/Outlook Authorization URL",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/oauth/microsoft/authorize",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "oauth", "microsoft", "authorize"]
-            },
-            "description": "Start Microsoft OAuth flow to connect Outlook/Microsoft account. Returns authorization_url that should be opened in browser/popup. User will authorize the app, then be redirected to callback URL. Use the authorization_url to redirect user to Microsoft's OAuth consent page."
-          },
-          "response": []
-        },
-        {
-          "name": "List Connected Email Providers",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "if (pm.response.code === 200) {",
-                  "    var jsonData = pm.response.json();",
-                  "    if (jsonData.providers && jsonData.providers.length > 0) {",
-                  "        pm.collectionVariables.set('provider_id', jsonData.providers[0].provider_id);",
-                  "    }",
-                  "}"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/oauth/providers",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "oauth", "providers"]
-            },
-            "description": "List all active email providers (Gmail/Outlook) connected for the current user. Returns array of provider objects with provider_id, email, provider type (google/microsoft), is_active status, and token expiration info. Use provider_id to disconnect a provider."
-          },
-          "response": []
-        },
-        {
-          "name": "Disconnect Email Provider",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{access_token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/oauth/providers/{{provider_id}}",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "oauth", "providers", "{{provider_id}}"]
-            },
-            "description": "Disconnect an email provider (Gmail or Outlook). Sets is_active=False (soft delete). Requires provider_id from the connected providers list. After disconnection, emails will fall back to AWS SES sending."
-          },
-          "response": []
-        },
-        {
-          "name": "Google OAuth Callback (Reference)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/oauth/google/callback?code=AUTHORIZATION_CODE&state=STATE_PARAMETER&redirect_uri=https://yourfrontend.com/oauth/callback",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "oauth", "google", "callback"],
-              "query": [
-                {
-                  "key": "code",
-                  "value": "AUTHORIZATION_CODE",
-                  "description": "Authorization code from Google (provided by Google after user consent)"
-                },
-                {
-                  "key": "state",
-                  "value": "STATE_PARAMETER",
-                  "description": "State parameter for CSRF protection (must match state from authorize request)"
-                },
-                {
-                  "key": "redirect_uri",
-                  "value": "https://yourfrontend.com/oauth/callback",
-                  "description": "Optional: Frontend URL to redirect to after OAuth completes. If provided, redirects with success/error params instead of showing HTML page."
-                }
-              ]
-            },
-            "description": "OAuth callback endpoint (handled automatically by Google redirect). This endpoint is called by Google after user authorizes the app. You can optionally provide redirect_uri query parameter to redirect back to your frontend with success/error status. Success redirect: ?success=true&provider=google&email=user@gmail.com&provider_id=uuid. Error redirect: ?error=error_message&provider=google"
-          },
-          "response": []
-        },
-        {
-          "name": "Microsoft OAuth Callback (Reference)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/oauth/microsoft/callback?code=AUTHORIZATION_CODE&state=STATE_PARAMETER&redirect_uri=https://yourfrontend.com/oauth/callback",
-              "host": ["{{baseUrl}}"],
-              "path": ["api", "auth", "oauth", "microsoft", "callback"],
-              "query": [
-                {
-                  "key": "code",
-                  "value": "AUTHORIZATION_CODE",
-                  "description": "Authorization code from Microsoft (provided by Microsoft after user consent)"
-                },
-                {
-                  "key": "state",
-                  "value": "STATE_PARAMETER",
-                  "description": "State parameter for CSRF protection (must match state from authorize request)"
-                },
-                {
-                  "key": "redirect_uri",
-                  "value": "https://yourfrontend.com/oauth/callback",
-                  "description": "Optional: Frontend URL to redirect to after OAuth completes. If provided, redirects with success/error params instead of showing HTML page."
-                }
-              ]
-            },
-            "description": "OAuth callback endpoint (handled automatically by Microsoft redirect). This endpoint is called by Microsoft after user authorizes the app. You can optionally provide redirect_uri query parameter to redirect back to your frontend with success/error status. Success redirect: ?success=true&provider=microsoft&email=user@outlook.com&provider_id=uuid. Error redirect: ?error=error_message&provider=microsoft"
-          },
-          "response": []
         }
       ]
     },
@@ -1586,16 +1422,16 @@
                   "key": "file",
                   "type": "file",
                   "src": [],
-                  "description": "CSV file with lead/email data. Columns: email, name (optional), profile_id (optional)"
+                  "description": "CSV file with lead/email data. Columns: linkedin_url (required), email (required), name (optional), notes (optional)"
                 }
               ]
             },
             "url": {
-              "raw": "{{baseUrl}}/api/emails/bulk-upload",
+              "raw": "{{baseUrl}}/api/profiles/bulk-upload-leads",
               "host": ["{{baseUrl}}"],
-              "path": ["api", "emails", "bulk-upload"]
+              "path": ["api", "profiles", "bulk-upload-leads"]
             },
-            "description": "Upload multiple leads/emails via CSV file. CSV should have columns: email, name (optional), profile_id (optional). Maximum 1000 emails per upload. Creates draft emails for each lead."
+            "description": "Upload multiple leads/emails via CSV file. CSV should have columns: linkedin_url (required), email (required), name (optional), notes (optional). Maximum 1000 leads per upload. Creates or updates profiles with email addresses. Use ?force_update=true to overwrite existing emails."
           }
         }
       ]
